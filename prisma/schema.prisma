@@ -1,0 +1,1836 @@
+generator client {
+    provider        = "prisma-client-js"
+    previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+    provider   = "postgresql"
+    url        = env("DATABASE_URL")
+    extensions = [postgis]
+}
+
+// ──────────────────────────────────────────────
+// ENUMS
+// ──────────────────────────────────────────────
+
+enum UserStatus {
+    ACTIVE
+    INACTIVE
+    SUSPENDED
+    PENDING
+}
+
+enum DocumentType {
+    CC
+    CE
+    PASSPORT
+    TI
+    NIT
+}
+
+enum Gender {
+    MALE
+    FEMALE
+}
+
+enum ActiveStatus {
+    ACTIVE
+    INACTIVE
+}
+
+enum SessionStatus {
+    ACTIVE
+    EXPIRED
+    REVOKED
+}
+
+enum TokenStatus {
+    ACTIVE
+    USED
+    EXPIRED
+}
+
+enum VerificationType {
+    EMAIL
+    PHONE
+}
+
+enum VerificationTokenStatus {
+    ACTIVE
+    VERIFIED
+    EXPIRED
+}
+
+enum DeviceType {
+    MOBILE
+    WEB
+    TABLET
+    OTHER
+}
+
+enum AuditAction {
+    LOGIN
+    LOGOUT
+    PASSWORD_RESET_REQUEST
+    PASSWORD_RESET_CONFIRM
+    ACCOUNT_LOCK
+    ACCOUNT_UNLOCK
+    VERIFICATION
+    SESSION_REVOKE
+}
+
+enum AuditFailureReason {
+    INVALID_PASSWORD
+    USER_NOT_FOUND
+    ACCOUNT_LOCKED
+    TOKEN_EXPIRED
+    INVALID_TOKEN
+    UNKNOWN
+}
+
+enum InvoiceStatus {
+    DRAFT
+    ISSUED
+    PARTIALLY_PAID
+    PAID
+    CANCELLED
+    VOIDED
+}
+
+enum AdjustmentType {
+    DISCOUNT
+    SURCHARGE
+    MANUAL_CORRECTION
+}
+
+enum PaymentStatus {
+    PENDING
+    PROCESSING
+    COMPLETED
+    FAILED
+    CANCELLED
+    REFUNDED
+    PARTIALLY_REFUNDED
+}
+
+enum PaymentMethodType {
+    CASH
+    CARD
+    BANK_TRANSFER
+    ONLINE_GATEWAY
+    CORPORATE
+    OTHER
+}
+
+enum ReferenceType {
+    BANK_RECEIPT
+    TRANSACTION_CODE
+    AUTH_CODE
+    OTHER
+}
+
+enum RefundStatus {
+    PENDING
+    PROCESSED
+    FAILED
+    CANCELLED
+}
+
+enum GatewayEnvironment {
+    SANDBOX
+    PRODUCTION
+}
+
+enum GatewayTransactionStatus {
+    CREATED
+    PENDING
+    APPROVED
+    DECLINED
+    ERROR
+    CANCELLED
+}
+
+enum FinancialEntityType {
+    INVOICE
+    PAYMENT
+    REFUND
+}
+
+enum BusinessDocumentType {
+    NIT
+    CC
+    CE
+    PASSPORT
+}
+
+enum BusinessEntityStatus {
+    ACTIVE
+    INACTIVE
+    SUSPENDED
+}
+
+enum BillingMode {
+    PREPAID
+    POSTPAID
+    MIXED
+}
+
+enum BillingFrequency {
+    MONTHLY
+    BIWEEKLY
+    WEEKLY
+    CUSTOM
+}
+
+enum ContractStatus {
+    ACTIVE
+    SUSPENDED
+    TERMINATED
+    EXPIRED
+}
+
+enum BillingPeriodStatus {
+    OPEN
+    CLOSED
+    INVOICED
+}
+
+enum InvoiceScope {
+    PERIODIC
+    ADVANCE
+    ADJUSTMENT
+}
+
+enum SupportDocumentType {
+    CONSUMPTION_REPORT
+    ATTENDANCE_CERTIFICATE
+    CUSTOM
+}
+
+enum BillingRuleType {
+    DISCOUNT_PERCENTAGE
+    FIXED_SERVICE_PRICE
+    GRACE_DAYS
+    CUSTOM
+}
+
+enum RoundingStrategy {
+    NONE
+    HALF_UP
+    DOWN
+    UP
+}
+
+enum TaxAppliesTo {
+    SERVICE
+    PACKAGE
+    INVOICE
+    ALL
+}
+
+enum InvoiceSequenceStatus {
+    ACTIVE
+    EXHAUSTED
+    EXPIRED
+    INACTIVE
+}
+
+// ──────────────────────────────────────────────
+// USERS & AUTH
+// ──────────────────────────────────────────────
+
+model User {
+    id            String     @id @default(uuid()) @db.Uuid
+    email         String     @unique @db.VarChar(150)
+    passwordHash  String     @map("password_hash") @db.VarChar(255)
+    status        UserStatus @default(ACTIVE)
+    emailVerified Boolean    @default(false) @map("email_verified")
+    accountLocked Boolean    @default(false) @map("account_locked")
+    lockedUntil   DateTime?  @map("locked_until")
+    createdAt     DateTime   @map("created_at")
+    updatedAt     DateTime?  @map("updated_at")
+    verifiedAt    DateTime?  @map("verified_at")
+    deletedAt     DateTime?  @map("deleted_at")
+
+    profile                UserProfile?
+    userRoles              UserRole[]
+    sessions               Session[]
+    recoveryTokens         RecoveryToken[]
+    verificationTokens     VerificationToken[]
+    devices                UserDevice[]
+    accessAudits           AccessAudit[]
+    invoicesOwned          Invoice[]                @relation("InvoiceUser")
+    invoicesCreated        Invoice[]                @relation("InvoiceCreatedBy")
+    invoiceAdjustments     InvoiceAdjustment[]
+    paymentsCreated        Payment[]
+    refundsCreated         Refund[]
+    businessContracts      BusinessContract[]
+    financialStatusChanges FinancialStatusHistory[]
+    financialTraceLogs     FinancialTraceLog[]
+    notificationSettings   NotificationSetting[]
+    pushDevices            PushDevice[]
+    notificationRecipients NotificationRecipient[]
+    supportTickets         SupportTicket[]
+
+    @@map("user")
+}
+
+model UserProfile {
+    id                      String       @id @default(uuid()) @db.Uuid
+    userId                  String       @unique @map("user_id") @db.Uuid
+    firstName               String       @map("first_name") @db.VarChar(100)
+    middleName              String?      @map("middle_name") @db.VarChar(100)
+    lastName                String       @map("last_name") @db.VarChar(100)
+    secondLastName          String?      @map("second_last_name") @db.VarChar(100)
+    documentType            DocumentType @map("document_type")
+    documentNumberEncrypted Bytes        @map("document_number_encrypted")
+    documentNumberHash      String       @unique @map("document_number_hash") @db.Char(64)
+    birthDate               DateTime?    @map("birth_date") @db.Date
+    gender                  Gender?
+    phone                   String?      @db.VarChar(30)
+    countryCode             String?      @map("country_code") @db.VarChar(10)
+    address                 String?      @db.VarChar(255)
+    neighborhood            String?      @db.VarChar(100)
+    commune                 Int?         @db.SmallInt
+    city                    String?      @db.VarChar(100)
+    department              String?      @db.VarChar(100)
+    createdAt               DateTime     @map("created_at")
+    updatedAt               DateTime?    @map("updated_at")
+
+    user User @relation(fields: [userId], references: [id])
+
+    @@map("user_profile")
+}
+
+model Role {
+    id          String       @id @default(uuid()) @db.Uuid
+    name        String       @unique @db.VarChar(100)
+    description String?      @db.Text
+    status      ActiveStatus @default(ACTIVE)
+    createdAt   DateTime     @map("created_at")
+    updatedAt   DateTime?    @map("updated_at")
+    deletedAt   DateTime?    @map("deleted_at")
+
+    permissions RolePermission[]
+    users       UserRole[]
+
+    @@map("role")
+}
+
+model Permission {
+    id          String       @id @default(uuid()) @db.Uuid
+    name        String       @unique @db.VarChar(100)
+    description String?      @db.Text
+    resource    String?      @db.VarChar(100)
+    action      String?      @db.VarChar(50)
+    status      ActiveStatus @default(ACTIVE)
+    createdAt   DateTime     @map("created_at")
+    updatedAt   DateTime?    @map("updated_at")
+
+    roles RolePermission[]
+
+    @@map("permission")
+}
+
+model RolePermission {
+    id           String       @id @default(uuid()) @db.Uuid
+    roleId       String       @map("role_id") @db.Uuid
+    permissionId String       @map("permission_id") @db.Uuid
+    assignedAt   DateTime     @map("assigned_at")
+    status       ActiveStatus @default(ACTIVE)
+    deletedAt    DateTime?    @map("deleted_at")
+
+    role       Role       @relation(fields: [roleId], references: [id])
+    permission Permission @relation(fields: [permissionId], references: [id])
+
+    @@map("role_permission")
+}
+
+model UserRole {
+    id         String       @id @default(uuid()) @db.Uuid
+    userId     String       @map("user_id") @db.Uuid
+    roleId     String       @map("role_id") @db.Uuid
+    assignedAt DateTime     @map("assigned_at")
+    status     ActiveStatus @default(ACTIVE)
+    deletedAt  DateTime?    @map("deleted_at")
+
+    user User @relation(fields: [userId], references: [id])
+    role Role @relation(fields: [roleId], references: [id])
+
+    @@map("user_role")
+}
+
+model Session {
+    id        String        @id @default(uuid()) @db.Uuid
+    userId    String        @map("user_id") @db.Uuid
+    token     String        @unique @db.VarChar(255)
+    ipAddress String?       @map("ip_address") @db.VarChar(50)
+    deviceId  String?       @map("device_id") @db.Uuid
+    createdAt DateTime      @map("created_at")
+    expiresAt DateTime      @map("expires_at")
+    revokedAt DateTime?     @map("revoked_at")
+    status    SessionStatus @default(ACTIVE)
+
+    user   User        @relation(fields: [userId], references: [id])
+    device UserDevice? @relation(fields: [deviceId], references: [id])
+
+    @@map("session")
+}
+
+model RecoveryToken {
+    id        String      @id @default(uuid()) @db.Uuid
+    userId    String      @map("user_id") @db.Uuid
+    token     String      @unique @db.VarChar(255)
+    createdAt DateTime    @map("created_at")
+    expiresAt DateTime    @map("expires_at")
+    usedAt    DateTime?   @map("used_at")
+    status    TokenStatus @default(ACTIVE)
+
+    user User @relation(fields: [userId], references: [id])
+
+    @@map("recovery_token")
+}
+
+model VerificationToken {
+    id         String                  @id @default(uuid()) @db.Uuid
+    userId     String                  @map("user_id") @db.Uuid
+    token      String                  @unique @db.VarChar(255)
+    type       VerificationType
+    createdAt  DateTime                @map("created_at")
+    expiresAt  DateTime                @map("expires_at")
+    verifiedAt DateTime?               @map("verified_at")
+    status     VerificationTokenStatus @default(ACTIVE)
+
+    user User @relation(fields: [userId], references: [id])
+
+    @@map("verification_token")
+}
+
+model UserDevice {
+    id         String       @id @default(uuid()) @db.Uuid
+    userId     String       @map("user_id") @db.Uuid
+    deviceUuid String       @unique @map("device_uuid") @db.VarChar(255)
+    deviceType DeviceType   @map("device_type")
+    deviceName String?      @map("device_name") @db.VarChar(100)
+    userAgent  String?      @map("user_agent") @db.VarChar(255)
+    osName     String?      @map("os_name") @db.VarChar(50)
+    osVersion  String?      @map("os_version") @db.VarChar(50)
+    appVersion String?      @map("app_version") @db.VarChar(50)
+    lastUsedAt DateTime?    @map("last_used_at")
+    status     ActiveStatus @default(ACTIVE)
+    createdAt  DateTime     @map("created_at")
+    updatedAt  DateTime?    @map("updated_at")
+
+    user     User          @relation(fields: [userId], references: [id])
+    sessions Session[]
+    audits   AccessAudit[]
+
+    @@map("user_device")
+}
+
+model AccessAudit {
+    id              String              @id @default(uuid()) @db.Uuid
+    userId          String?             @map("user_id") @db.Uuid
+    usernameAttempt String?             @map("username_attempt") @db.VarChar(150)
+    action          AuditAction
+    success         Boolean             @default(false)
+    failureReason   AuditFailureReason? @map("failure_reason")
+    ipAddress       String?             @map("ip_address") @db.VarChar(50)
+    userAgent       String?             @map("user_agent") @db.VarChar(255)
+    deviceId        String?             @map("device_id") @db.Uuid
+    occurredAt      DateTime            @map("occurred_at")
+
+    user   User?       @relation(fields: [userId], references: [id])
+    device UserDevice? @relation(fields: [deviceId], references: [id])
+
+    @@map("access_audit")
+}
+
+// ──────────────────────────────────────────────
+// BILLING & FINANCIAL
+// ──────────────────────────────────────────────
+
+model Invoice {
+    id                String        @id @default(uuid()) @db.Uuid
+    invoiceSequenceId String        @map("invoice_sequence_id") @db.Uuid
+    invoiceNumber     String        @map("invoice_number") @db.VarChar(50)
+    invoiceTypeId     String        @map("invoice_type_id") @db.Uuid
+    userId            String?       @map("user_id") @db.Uuid
+    currency          String        @default("COP") @db.VarChar(10)
+    subtotalAmount    Decimal       @default(0) @map("subtotal_amount") @db.Decimal(14, 2)
+    discountAmount    Decimal       @default(0) @map("discount_amount") @db.Decimal(14, 2)
+    taxAmount         Decimal       @default(0) @map("tax_amount") @db.Decimal(14, 2)
+    totalAmount       Decimal       @default(0) @map("total_amount") @db.Decimal(14, 2)
+    status            InvoiceStatus @default(DRAFT)
+    issuedAt          DateTime?     @map("issued_at")
+    dueDate           DateTime?     @map("due_date") @db.Date
+    notes             String?       @db.Text
+    createdBy         String?       @map("created_by") @db.Uuid
+    createdAt         DateTime      @map("created_at")
+    updatedAt         DateTime?     @map("updated_at")
+    deletedAt         DateTime?     @map("deleted_at")
+
+    invoiceSequence     InvoiceSequence      @relation(fields: [invoiceSequenceId], references: [id])
+    invoiceType         InvoiceType          @relation(fields: [invoiceTypeId], references: [id])
+    user                User?                @relation("InvoiceUser", fields: [userId], references: [id])
+    creator             User?                @relation("InvoiceCreatedBy", fields: [createdBy], references: [id])
+    items               InvoiceItem[]
+    adjustments         InvoiceAdjustment[]
+    party               InvoiceParty?
+    payments            Payment[]
+    paymentApplications PaymentApplication[]
+    businessInvoice     BusinessInvoice?
+
+    @@map("invoice")
+}
+
+model InvoiceType {
+    id          String       @id @default(uuid()) @db.Uuid
+    code        String       @unique @db.VarChar(50)
+    name        String       @db.VarChar(150)
+    description String?      @db.Text
+    status      ActiveStatus @default(ACTIVE)
+    createdAt   DateTime     @map("created_at")
+    updatedAt   DateTime?    @map("updated_at")
+
+    invoices         Invoice[]
+    invoiceSequences InvoiceSequence[]
+
+    @@map("invoice_type")
+}
+
+model InvoiceItem {
+    id             String    @id @default(uuid()) @db.Uuid
+    invoiceId      String    @map("invoice_id") @db.Uuid
+    description    String    @db.VarChar(255)
+    quantity       Int       @default(1)
+    unitPrice      Decimal   @map("unit_price") @db.Decimal(14, 2)
+    subtotalAmount Decimal   @map("subtotal_amount") @db.Decimal(14, 2)
+    discountAmount Decimal   @default(0) @map("discount_amount") @db.Decimal(14, 2)
+    taxAmount      Decimal   @default(0) @map("tax_amount") @db.Decimal(14, 2)
+    totalAmount    Decimal   @map("total_amount") @db.Decimal(14, 2)
+    sortOrder      Int?      @map("sort_order")
+    createdAt      DateTime  @map("created_at")
+    updatedAt      DateTime? @map("updated_at")
+
+    invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+    @@map("invoice_item")
+}
+
+model InvoiceAdjustment {
+    id             String         @id @default(uuid()) @db.Uuid
+    invoiceId      String         @map("invoice_id") @db.Uuid
+    adjustmentType AdjustmentType @map("adjustment_type")
+    reason         String?        @db.VarChar(255)
+    amount         Decimal        @db.Decimal(14, 2)
+    createdBy      String?        @map("created_by") @db.Uuid
+    createdAt      DateTime       @map("created_at")
+    updatedAt      DateTime?      @map("updated_at")
+
+    invoice Invoice @relation(fields: [invoiceId], references: [id])
+    creator User?   @relation(fields: [createdBy], references: [id])
+
+    @@map("invoice_adjustment")
+}
+
+model InvoiceParty {
+    id             String       @id @default(uuid()) @db.Uuid
+    invoiceId      String       @unique @map("invoice_id") @db.Uuid
+    documentType   DocumentType @map("document_type")
+    documentNumber String       @map("document_number") @db.VarChar(50)
+    fullName       String       @map("full_name") @db.VarChar(255)
+    email          String?      @db.VarChar(150)
+    phone          String?      @db.VarChar(50)
+    address        String?      @db.VarChar(255)
+    city           String?      @db.VarChar(100)
+    department     String?      @db.VarChar(100)
+    country        String?      @default("Colombia") @db.VarChar(100)
+    createdAt      DateTime     @map("created_at")
+    updatedAt      DateTime?    @map("updated_at")
+
+    invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+    @@map("invoice_party")
+}
+
+model Payment {
+    id                String        @id @default(uuid()) @db.Uuid
+    paymentNumber     String        @unique @map("payment_number") @db.VarChar(50)
+    invoiceId         String        @map("invoice_id") @db.Uuid
+    paymentMethodId   String        @map("payment_method_id") @db.Uuid
+    amount            Decimal       @db.Decimal(14, 2)
+    currency          String        @default("COP") @db.VarChar(10)
+    status            PaymentStatus @default(PENDING)
+    paidAt            DateTime?     @map("paid_at")
+    failedAt          DateTime?     @map("failed_at")
+    externalReference String?       @map("external_reference") @db.VarChar(150)
+    notes             String?       @db.Text
+    createdBy         String?       @map("created_by") @db.Uuid
+    createdAt         DateTime      @map("created_at")
+    updatedAt         DateTime?     @map("updated_at")
+    deletedAt         DateTime?     @map("deleted_at")
+
+    invoice             Invoice              @relation(fields: [invoiceId], references: [id])
+    paymentMethod       PaymentMethod        @relation(fields: [paymentMethodId], references: [id])
+    creator             User?                @relation(fields: [createdBy], references: [id])
+    applications        PaymentApplication[]
+    references          PaymentReference[]
+    refunds             Refund[]
+    gatewayTransactions GatewayTransaction[]
+
+    @@map("payment")
+}
+
+model PaymentMethod {
+    id                 String            @id @default(uuid()) @db.Uuid
+    code               String            @unique @db.VarChar(50)
+    name               String            @db.VarChar(100)
+    methodType         PaymentMethodType @map("method_type")
+    requiresGateway    Boolean           @default(false) @map("requires_gateway")
+    allowsInstallments Boolean           @default(false) @map("allows_installments")
+    status             ActiveStatus      @default(ACTIVE)
+    createdAt          DateTime          @map("created_at")
+    updatedAt          DateTime?         @map("updated_at")
+
+    payments Payment[]
+
+    @@map("payment_method")
+}
+
+model PaymentApplication {
+    id            String    @id @default(uuid()) @db.Uuid
+    paymentId     String    @map("payment_id") @db.Uuid
+    invoiceId     String    @map("invoice_id") @db.Uuid
+    appliedAmount Decimal   @map("applied_amount") @db.Decimal(14, 2)
+    createdAt     DateTime  @map("created_at")
+    updatedAt     DateTime? @map("updated_at")
+
+    payment Payment @relation(fields: [paymentId], references: [id])
+    invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+    @@map("payment_application")
+}
+
+model PaymentReference {
+    id              String        @id @default(uuid()) @db.Uuid
+    paymentId       String        @map("payment_id") @db.Uuid
+    referenceNumber String        @map("reference_number") @db.VarChar(100)
+    referenceType   ReferenceType @map("reference_type")
+    attachmentUrl   String?       @map("attachment_url") @db.VarChar(255)
+    createdAt       DateTime      @map("created_at")
+    updatedAt       DateTime?     @map("updated_at")
+
+    payment Payment @relation(fields: [paymentId], references: [id])
+
+    @@map("payment_reference")
+}
+
+model Refund {
+    id           String       @id @default(uuid()) @db.Uuid
+    paymentId    String       @map("payment_id") @db.Uuid
+    refundNumber String       @unique @map("refund_number") @db.VarChar(50)
+    amount       Decimal      @db.Decimal(14, 2)
+    reason       String?      @db.VarChar(255)
+    status       RefundStatus @default(PENDING)
+    processedAt  DateTime?    @map("processed_at")
+    createdBy    String?      @map("created_by") @db.Uuid
+    createdAt    DateTime     @map("created_at")
+    updatedAt    DateTime?    @map("updated_at")
+
+    payment Payment @relation(fields: [paymentId], references: [id])
+    creator User?   @relation(fields: [createdBy], references: [id])
+
+    @@map("refund")
+}
+
+model GatewayProvider {
+    id          String             @id @default(uuid()) @db.Uuid
+    code        String             @unique @db.VarChar(50)
+    name        String             @db.VarChar(150)
+    environment GatewayEnvironment @default(SANDBOX)
+    status      ActiveStatus       @default(ACTIVE)
+    createdAt   DateTime           @map("created_at")
+    updatedAt   DateTime?          @map("updated_at")
+
+    configurations GatewayConfiguration[]
+    transactions   GatewayTransaction[]
+
+    @@map("gateway_provider")
+}
+
+model GatewayConfiguration {
+    id                String    @id @default(uuid()) @db.Uuid
+    gatewayProviderId String    @map("gateway_provider_id") @db.Uuid
+    publicKey         String?   @map("public_key") @db.VarChar(255)
+    privateKey        String?   @map("private_key") @db.VarChar(255)
+    webhookUrl        String?   @map("webhook_url") @db.VarChar(255)
+    isActive          Boolean   @default(true) @map("is_active")
+    createdAt         DateTime  @map("created_at")
+    updatedAt         DateTime? @map("updated_at")
+
+    gatewayProvider GatewayProvider @relation(fields: [gatewayProviderId], references: [id])
+
+    @@map("gateway_configuration")
+}
+
+model GatewayTransaction {
+    id                    String                   @id @default(uuid()) @db.Uuid
+    paymentId             String                   @map("payment_id") @db.Uuid
+    gatewayProviderId     String                   @map("gateway_provider_id") @db.Uuid
+    externalTransactionId String                   @map("external_transaction_id") @db.VarChar(150)
+    status                GatewayTransactionStatus
+    requestPayload        Json?                    @map("request_payload")
+    responsePayload       Json?                    @map("response_payload")
+    processedAt           DateTime?                @map("processed_at")
+    createdAt             DateTime                 @map("created_at")
+    updatedAt             DateTime?                @map("updated_at")
+
+    payment         Payment         @relation(fields: [paymentId], references: [id])
+    gatewayProvider GatewayProvider @relation(fields: [gatewayProviderId], references: [id])
+    events          GatewayEvent[]
+
+    @@map("gateway_transaction")
+}
+
+model GatewayEvent {
+    id                   String    @id @default(uuid()) @db.Uuid
+    gatewayTransactionId String    @map("gateway_transaction_id") @db.Uuid
+    eventType            String    @map("event_type") @db.VarChar(100)
+    payload              Json
+    receivedAt           DateTime  @map("received_at")
+    processed            Boolean   @default(false)
+    processedAt          DateTime? @map("processed_at")
+    createdAt            DateTime  @map("created_at")
+
+    gatewayTransaction GatewayTransaction @relation(fields: [gatewayTransactionId], references: [id])
+
+    @@map("gateway_event")
+}
+
+model FinancialStatusHistory {
+    id             String              @id @default(uuid()) @db.Uuid
+    entityType     FinancialEntityType @map("entity_type")
+    entityId       String              @map("entity_id") @db.Uuid
+    previousStatus String?             @map("previous_status") @db.VarChar(50)
+    newStatus      String              @map("new_status") @db.VarChar(50)
+    changedBy      String?             @map("changed_by") @db.Uuid
+    changeReason   String?             @map("change_reason") @db.VarChar(255)
+    changedAt      DateTime            @map("changed_at")
+
+    changer User? @relation(fields: [changedBy], references: [id])
+
+    @@map("financial_status_history")
+}
+
+model FinancialTraceLog {
+    id         String   @id @default(uuid()) @db.Uuid
+    entityType String   @map("entity_type") @db.VarChar(50)
+    entityId   String   @map("entity_id") @db.Uuid
+    action     String   @db.VarChar(100)
+    metadata   Json?
+    createdBy  String?  @map("created_by") @db.Uuid
+    createdAt  DateTime @map("created_at")
+
+    creator User? @relation(fields: [createdBy], references: [id])
+
+    @@map("financial_trace_log")
+}
+
+model BusinessEntity {
+    id                   String               @id @default(uuid()) @db.Uuid
+    legalName            String               @map("legal_name") @db.VarChar(255)
+    tradeName            String?              @map("trade_name") @db.VarChar(255)
+    documentType         BusinessDocumentType @map("document_type")
+    documentNumber       String               @unique @map("document_number") @db.VarChar(50)
+    taxRegime            String?              @map("tax_regime") @db.VarChar(100)
+    economicActivityCode String?              @map("economic_activity_code") @db.VarChar(50)
+    contactEmail         String?              @map("contact_email") @db.VarChar(150)
+    contactPhone         String?              @map("contact_phone") @db.VarChar(50)
+    billingAddress       String?              @map("billing_address") @db.VarChar(255)
+    city                 String?              @db.VarChar(100)
+    department           String?              @db.VarChar(100)
+    country              String               @default("Colombia") @db.VarChar(100)
+    status               BusinessEntityStatus @default(ACTIVE)
+    createdAt            DateTime             @map("created_at")
+    updatedAt            DateTime?            @map("updated_at")
+    deletedAt            DateTime?            @map("deleted_at")
+
+    contracts         BusinessContract[]
+    financialSettings FinancialSetting[]
+    invoiceSequences  InvoiceSequence[]
+
+    @@map("business_entity")
+}
+
+model BusinessContract {
+    id               String           @id @default(uuid()) @db.Uuid
+    businessEntityId String           @map("business_entity_id") @db.Uuid
+    contractCode     String           @unique @map("contract_code") @db.VarChar(50)
+    startDate        DateTime         @map("start_date") @db.Date
+    endDate          DateTime?        @map("end_date") @db.Date
+    billingMode      BillingMode      @map("billing_mode")
+    billingFrequency BillingFrequency @default(MONTHLY) @map("billing_frequency")
+    creditLimit      Decimal?         @map("credit_limit") @db.Decimal(14, 2)
+    currency         String           @default("COP") @db.VarChar(10)
+    status           ContractStatus   @default(ACTIVE)
+    notes            String?          @db.Text
+    createdBy        String?          @map("created_by") @db.Uuid
+    createdAt        DateTime         @map("created_at")
+    updatedAt        DateTime?        @map("updated_at")
+    deletedAt        DateTime?        @map("deleted_at")
+
+    businessEntity   BusinessEntity          @relation(fields: [businessEntityId], references: [id])
+    creator          User?                   @relation(fields: [createdBy], references: [id])
+    billingPeriods   BusinessBillingPeriod[]
+    billingRules     BusinessBillingRule[]
+    businessInvoices BusinessInvoice[]
+
+    @@map("business_contract")
+}
+
+model BusinessBillingPeriod {
+    id                     String              @id @default(uuid()) @db.Uuid
+    businessContractId     String              @map("business_contract_id") @db.Uuid
+    periodStart            DateTime            @map("period_start") @db.Date
+    periodEnd              DateTime            @map("period_end") @db.Date
+    totalConsumptionAmount Decimal             @default(0) @map("total_consumption_amount") @db.Decimal(14, 2)
+    totalInvoiceAmount     Decimal             @default(0) @map("total_invoice_amount") @db.Decimal(14, 2)
+    status                 BillingPeriodStatus @default(OPEN)
+    closedAt               DateTime?           @map("closed_at")
+    createdAt              DateTime            @map("created_at")
+    updatedAt              DateTime?           @map("updated_at")
+
+    businessContract     BusinessContract             @relation(fields: [businessContractId], references: [id])
+    consumptionSummaries BusinessConsumptionSummary[]
+    businessInvoices     BusinessInvoice[]
+
+    @@map("business_billing_period")
+}
+
+model BusinessConsumptionSummary {
+    id                      String    @id @default(uuid()) @db.Uuid
+    businessBillingPeriodId String    @map("business_billing_period_id") @db.Uuid
+    quantity                Int       @default(0)
+    unitPrice               Decimal   @map("unit_price") @db.Decimal(14, 2)
+    totalAmount             Decimal   @map("total_amount") @db.Decimal(14, 2)
+    createdAt               DateTime  @map("created_at")
+    updatedAt               DateTime? @map("updated_at")
+
+    businessBillingPeriod BusinessBillingPeriod @relation(fields: [businessBillingPeriodId], references: [id])
+
+    @@map("business_consumption_summary")
+}
+
+model BusinessInvoice {
+    id                      String       @id @default(uuid()) @db.Uuid
+    invoiceId               String       @unique @map("invoice_id") @db.Uuid
+    businessContractId      String       @map("business_contract_id") @db.Uuid
+    businessBillingPeriodId String?      @map("business_billing_period_id") @db.Uuid
+    invoiceScope            InvoiceScope @map("invoice_scope")
+    createdAt               DateTime     @map("created_at")
+    updatedAt               DateTime?    @map("updated_at")
+
+    invoice               Invoice                          @relation(fields: [invoiceId], references: [id])
+    businessContract      BusinessContract                 @relation(fields: [businessContractId], references: [id])
+    businessBillingPeriod BusinessBillingPeriod?           @relation(fields: [businessBillingPeriodId], references: [id])
+    supportDocuments      BusinessBillingSupportDocument[]
+
+    @@map("business_invoice")
+}
+
+model BusinessBillingSupportDocument {
+    id                String              @id @default(uuid()) @db.Uuid
+    businessInvoiceId String              @map("business_invoice_id") @db.Uuid
+    documentType      SupportDocumentType @map("document_type")
+    fileUrl           String              @map("file_url") @db.VarChar(255)
+    generatedAt       DateTime            @map("generated_at")
+    createdAt         DateTime            @map("created_at")
+    updatedAt         DateTime?           @map("updated_at")
+
+    businessInvoice BusinessInvoice @relation(fields: [businessInvoiceId], references: [id])
+
+    @@map("business_billing_support_document")
+}
+
+model BusinessBillingRule {
+    id                 String          @id @default(uuid()) @db.Uuid
+    businessContractId String          @map("business_contract_id") @db.Uuid
+    ruleType           BillingRuleType @map("rule_type")
+    discountPercentage Decimal?        @map("discount_percentage") @db.Decimal(5, 2)
+    fixedPrice         Decimal?        @map("fixed_price") @db.Decimal(14, 2)
+    graceDays          Int?            @map("grace_days")
+    priority           Int             @default(1)
+    validFrom          DateTime?       @map("valid_from") @db.Date
+    validUntil         DateTime?       @map("valid_until") @db.Date
+    status             ActiveStatus    @default(ACTIVE)
+    createdAt          DateTime        @map("created_at")
+    updatedAt          DateTime?       @map("updated_at")
+
+    businessContract BusinessContract @relation(fields: [businessContractId], references: [id])
+
+    @@map("business_billing_rule")
+}
+
+model FinancialSetting {
+    id                     String           @id @default(uuid()) @db.Uuid
+    businessEntityId       String?          @map("business_entity_id") @db.Uuid
+    defaultCurrency        String           @default("COP") @map("default_currency") @db.VarChar(10)
+    defaultTaxId           String?          @map("default_tax_id") @db.Uuid
+    invoiceDueDays         Int              @default(0) @map("invoice_due_days")
+    allowNegativeInvoice   Boolean          @default(false) @map("allow_negative_invoice")
+    autoCloseBillingPeriod Boolean          @default(true) @map("auto_close_billing_period")
+    roundingStrategy       RoundingStrategy @default(HALF_UP) @map("rounding_strategy")
+    status                 ActiveStatus     @default(ACTIVE)
+    createdAt              DateTime         @map("created_at")
+    updatedAt              DateTime?        @map("updated_at")
+
+    businessEntity BusinessEntity? @relation(fields: [businessEntityId], references: [id])
+    defaultTax     Tax?            @relation(fields: [defaultTaxId], references: [id])
+
+    @@map("financial_setting")
+}
+
+model Tax {
+    id            String       @id @default(uuid()) @db.Uuid
+    code          String       @unique @db.VarChar(50)
+    name          String       @db.VarChar(150)
+    percentage    Decimal      @db.Decimal(5, 2)
+    appliesTo     TaxAppliesTo @map("applies_to")
+    isWithholding Boolean      @default(false) @map("is_withholding")
+    status        ActiveStatus @default(ACTIVE)
+    createdAt     DateTime     @map("created_at")
+    updatedAt     DateTime?    @map("updated_at")
+
+    financialSettings FinancialSetting[]
+
+    @@map("tax")
+}
+
+model InvoiceSequence {
+    id                       String                @id @default(uuid()) @db.Uuid
+    businessEntityId         String                @map("business_entity_id") @db.Uuid
+    invoiceTypeId            String                @map("invoice_type_id") @db.Uuid
+    prefix                   String                @db.VarChar(20)
+    currentNumber            BigInt                @default(0) @map("current_number")
+    minNumber                BigInt?               @map("min_number")
+    maxNumber                BigInt?               @map("max_number")
+    resolutionNumber         String?               @map("resolution_number") @db.VarChar(100)
+    resolutionDate           DateTime?             @map("resolution_date") @db.Date
+    resolutionExpirationDate DateTime?             @map("resolution_expiration_date") @db.Date
+    status                   InvoiceSequenceStatus @default(ACTIVE)
+    createdAt                DateTime              @map("created_at")
+    updatedAt                DateTime?             @map("updated_at")
+
+    businessEntity BusinessEntity @relation(fields: [businessEntityId], references: [id])
+    invoiceType    InvoiceType    @relation(fields: [invoiceTypeId], references: [id])
+    invoices       Invoice[]
+
+    @@map("invoice_sequence")
+}
+
+// ──────────────────────────────────────────────
+// NOTIFICATIONS
+// ──────────────────────────────────────────────
+
+model NotificationChannel {
+    id        String    @id @default(uuid()) @db.Uuid
+    code      String    @unique @db.VarChar(50)
+    name      String    @db.VarChar(100)
+    isActive  Boolean?  @default(true) @map("is_active")
+    createdAt DateTime? @map("created_at")
+    updatedAt DateTime? @map("updated_at")
+
+    templates  NotificationTemplate[]
+    settings   NotificationSetting[]
+    deliveries NotificationDelivery[]
+
+    @@map("notification_channel")
+}
+
+model NotificationTemplate {
+    id        String    @id @default(uuid()) @db.Uuid
+    code      String    @db.VarChar(100)
+    channelId String    @map("channel_id") @db.Uuid
+    subject   String?   @db.VarChar(255)
+    body      String    @db.Text
+    isActive  Boolean?  @default(true) @map("is_active")
+    version   Int?      @default(1)
+    createdAt DateTime? @map("created_at")
+    updatedAt DateTime? @map("updated_at")
+
+    channel        NotificationChannel         @relation(fields: [channelId], references: [id])
+    eventTemplates NotificationEventTemplate[]
+
+    @@unique([code, channelId])
+    @@map("notification_template")
+}
+
+model NotificationSetting {
+    id               String    @id @default(uuid()) @db.Uuid
+    userId           String    @map("user_id") @db.Uuid
+    channelId        String    @map("channel_id") @db.Uuid
+    notificationCode String    @map("notification_code") @db.VarChar(100)
+    isEnabled        Boolean?  @default(true) @map("is_enabled")
+    createdAt        DateTime? @map("created_at")
+    updatedAt        DateTime? @map("updated_at")
+
+    user    User                @relation(fields: [userId], references: [id])
+    channel NotificationChannel @relation(fields: [channelId], references: [id])
+
+    @@unique([userId, channelId, notificationCode])
+    @@map("notification_setting")
+}
+
+model PushDevice {
+    id          String    @id @default(uuid()) @db.Uuid
+    userId      String    @map("user_id") @db.Uuid
+    deviceToken String    @unique @map("device_token") @db.VarChar(255)
+    platform    String?   @db.VarChar(50)
+    isActive    Boolean?  @default(true) @map("is_active")
+    lastUsedAt  DateTime? @map("last_used_at")
+    createdAt   DateTime? @map("created_at")
+    updatedAt   DateTime? @map("updated_at")
+
+    user User @relation(fields: [userId], references: [id])
+
+    @@map("push_device")
+}
+
+model Notification {
+    id          String    @id @default(uuid()) @db.Uuid
+    code        String    @db.VarChar(100)
+    entityType  String?   @map("entity_type") @db.VarChar(100)
+    entityId    String?   @map("entity_id") @db.Uuid
+    payload     Json?
+    status      String?   @db.VarChar(50)
+    createdAt   DateTime? @map("created_at")
+    processedAt DateTime? @map("processed_at")
+
+    recipients NotificationRecipient[]
+
+    @@map("notification")
+}
+
+model NotificationRecipient {
+    id             String    @id @default(uuid()) @db.Uuid
+    notificationId String    @map("notification_id") @db.Uuid
+    userId         String?   @map("user_id") @db.Uuid
+    externalEmail  String?   @map("external_email") @db.VarChar(255)
+    externalPhone  String?   @map("external_phone") @db.VarChar(50)
+    createdAt      DateTime? @map("created_at")
+
+    notification Notification           @relation(fields: [notificationId], references: [id])
+    user         User?                  @relation(fields: [userId], references: [id])
+    deliveries   NotificationDelivery[]
+
+    @@map("notification_recipient")
+}
+
+model NotificationDelivery {
+    id                      String    @id @default(uuid()) @db.Uuid
+    notificationRecipientId String    @map("notification_recipient_id") @db.Uuid
+    channelId               String    @map("channel_id") @db.Uuid
+    provider                String?   @db.VarChar(100)
+    providerMessageId       String?   @map("provider_message_id") @db.VarChar(255)
+    status                  String?   @db.VarChar(50)
+    attemptCount            Int?      @default(0) @map("attempt_count")
+    errorMessage            String?   @map("error_message") @db.Text
+    sentAt                  DateTime? @map("sent_at")
+    deliveredAt             DateTime? @map("delivered_at")
+    readAt                  DateTime? @map("read_at")
+    createdAt               DateTime? @map("created_at")
+
+    recipient NotificationRecipient @relation(fields: [notificationRecipientId], references: [id])
+    channel   NotificationChannel   @relation(fields: [channelId], references: [id])
+
+    @@map("notification_delivery")
+}
+
+model NotificationEvent {
+    id          String    @id @default(uuid()) @db.Uuid
+    code        String    @unique @db.VarChar(100)
+    name        String    @db.VarChar(150)
+    description String?   @db.Text
+    entityType  String?   @map("entity_type") @db.VarChar(100)
+    isActive    Boolean?  @default(true) @map("is_active")
+    isSystem    Boolean?  @default(true) @map("is_system")
+    createdAt   DateTime? @map("created_at")
+    updatedAt   DateTime? @map("updated_at")
+
+    eventTemplates NotificationEventTemplate[]
+
+    @@map("notification_event")
+}
+
+model NotificationEventTemplate {
+    id         String @id @default(uuid()) @db.Uuid
+    eventId    String @map("event_id") @db.Uuid
+    templateId String @map("template_id") @db.Uuid
+
+    event    NotificationEvent    @relation(fields: [eventId], references: [id])
+    template NotificationTemplate @relation(fields: [templateId], references: [id])
+
+    @@unique([eventId, templateId])
+    @@map("notification_event_template")
+}
+
+// ──────────────────────────────────────────────
+// GEOSPATIAL & TRACKING
+// ──────────────────────────────────────────────
+
+model Location {
+    id          String    @id @default(uuid()) @db.Uuid
+    name        String?
+    description String?   @db.Text
+    categoryId  String?   @map("category_id") @db.Uuid
+    createdAt   DateTime? @map("created_at")
+    updatedAt   DateTime? @map("updated_at")
+
+    category                  LocationCategory?             @relation(fields: [categoryId], references: [id])
+    addresses                 LocationAddress[]
+    restaurants               Restaurant[]
+    customerAddresses         CustomerAddress[]
+    deliveryRouteOrigins      DeliveryRoute[]               @relation("RouteOrigin")
+    deliveryRouteDestinations DeliveryRoute[]               @relation("RouteDestination")
+    distanceOrigins           DeliveryDistanceCalculation[] @relation("DistanceOrigin")
+    distanceDestinations      DeliveryDistanceCalculation[] @relation("DistanceDestination")
+
+    @@map("location")
+}
+
+model LocationAddress {
+    id         String                    @id @default(uuid()) @db.Uuid
+    locationId String?                   @map("location_id") @db.Uuid
+    country    String?
+    state      String?
+    city       String?
+    street     String?
+    postalCode String?                   @map("postal_code")
+    latitude   Decimal?
+    longitude  Decimal?
+    geom       Unsupported("geography")?
+    createdAt  DateTime?                 @map("created_at")
+
+    location Location? @relation(fields: [locationId], references: [id])
+
+    @@map("location_address")
+}
+
+model LocationCategory {
+    id          String  @id @default(uuid()) @db.Uuid
+    name        String?
+    description String? @db.Text
+
+    locations Location[]
+
+    @@map("location_category")
+}
+
+model GeofenceGroup {
+    id          String  @id @default(uuid()) @db.Uuid
+    name        String?
+    description String? @db.Text
+
+    geofences Geofence[]
+
+    @@map("geofence_group")
+}
+
+model Geofence {
+    id           String                   @id @default(uuid()) @db.Uuid
+    name         String?
+    description  String?                  @db.Text
+    groupId      String?                  @map("group_id") @db.Uuid
+    geom         Unsupported("geometry")?
+    radiusMeters Int?                     @map("radius_meters")
+    createdAt    DateTime?                @map("created_at")
+
+    group             GeofenceGroup?          @relation(fields: [groupId], references: [id])
+    assignments       GeofenceAssignment[]
+    courierZones      CourierZoneAssignment[]
+    spatialRules      SpatialRule[]
+    spatialEventLogs  SpatialEventLog[]
+    deliveryRateRules DeliveryRateRule[]
+
+    @@map("geofence")
+}
+
+model GeofenceAssignment {
+    id         String    @id @default(uuid()) @db.Uuid
+    geofenceId String?   @map("geofence_id") @db.Uuid
+    courierId  String?   @map("courier_id") @db.Uuid
+    createdAt  DateTime? @map("created_at")
+
+    geofence Geofence? @relation(fields: [geofenceId], references: [id])
+
+    @@map("geofence_assignment")
+}
+
+model Delivery {
+    id          String    @id @default(uuid()) @db.Uuid
+    orderId     String?   @map("order_id") @db.Uuid
+    courierId   String?   @map("courier_id") @db.Uuid
+    startedAt   DateTime? @map("started_at")
+    completedAt DateTime? @map("completed_at")
+    status      String?
+
+    order            Order?                  @relation("DeliveryBelongsToOrder", fields: [orderId], references: [id])
+    orderAssigned    Order?                  @relation("OrderCurrentDelivery")
+    courier          Courier?                @relation(fields: [courierId], references: [id])
+    trackingLatest   TrackingLatest?
+    trackingHistory  TrackingHistory[]
+    spatialEventLogs SpatialEventLog[]
+    routes           DeliveryRoute[]
+    statusHistories  DeliveryStatusHistory[]
+    proofs           DeliveryProof[]
+
+    @@map("delivery")
+}
+
+model TrackingLatest {
+    deliveryId String                    @id @map("delivery_id") @db.Uuid
+    courierId  String?                   @map("courier_id") @db.Uuid
+    latitude   Decimal?
+    longitude  Decimal?
+    geom       Unsupported("geography")?
+    speed      Decimal?
+    heading    Decimal?
+    recordedAt DateTime?                 @map("recorded_at")
+
+    delivery Delivery @relation(fields: [deliveryId], references: [id])
+
+    @@map("tracking_latest")
+}
+
+model TrackingHistory {
+    id         String                    @id @default(uuid()) @db.Uuid
+    deliveryId String?                   @map("delivery_id") @db.Uuid
+    courierId  String?                   @map("courier_id") @db.Uuid
+    latitude   Decimal?
+    longitude  Decimal?
+    geom       Unsupported("geography")?
+    speed      Decimal?
+    heading    Decimal?
+    recordedAt DateTime?                 @map("recorded_at")
+
+    delivery Delivery? @relation(fields: [deliveryId], references: [id])
+
+    @@map("tracking_history")
+}
+
+model SpatialRule {
+    id          String   @id @default(uuid()) @db.Uuid
+    name        String?
+    description String?  @db.Text
+    triggerType String?  @map("trigger_type")
+    geofenceId  String?  @map("geofence_id") @db.Uuid
+    isActive    Boolean? @map("is_active")
+
+    geofence  Geofence?         @relation(fields: [geofenceId], references: [id])
+    eventLogs SpatialEventLog[]
+
+    @@map("spatial_rule")
+}
+
+model SpatialEventLog {
+    id         String    @id @default(uuid()) @db.Uuid
+    deliveryId String?   @map("delivery_id") @db.Uuid
+    courierId  String?   @map("courier_id") @db.Uuid
+    ruleId     String?   @map("rule_id") @db.Uuid
+    geofenceId String?   @map("geofence_id") @db.Uuid
+    eventType  String?   @map("event_type")
+    latitude   Decimal?
+    longitude  Decimal?
+    occurredAt DateTime? @map("occurred_at")
+
+    delivery Delivery?    @relation(fields: [deliveryId], references: [id])
+    rule     SpatialRule? @relation(fields: [ruleId], references: [id])
+    geofence Geofence?    @relation(fields: [geofenceId], references: [id])
+
+    @@map("spatial_event_log")
+}
+
+// ──────────────────────────────────────────────
+// RESTAURANTS
+// ──────────────────────────────────────────────
+
+model Restaurant {
+    id         String    @id @default(uuid()) @db.Uuid
+    ownerId    String?   @map("owner_id") @db.Uuid
+    profileId  String?   @map("profile_id") @db.Uuid
+    statusId   String?   @map("status_id") @db.Uuid
+    locationId String?   @map("location_id") @db.Uuid
+    createdAt  DateTime? @map("created_at")
+    updatedAt  DateTime? @map("updated_at")
+
+    owner     RestaurantOwner?     @relation(fields: [ownerId], references: [id])
+    profile   RestaurantProfile?   @relation(fields: [profileId], references: [id])
+    status    RestaurantStatus?    @relation(fields: [statusId], references: [id])
+    location  Location?            @relation(fields: [locationId], references: [id])
+    schedules RestaurantSchedule[]
+    documents RestaurantDocument[]
+    orders    Order[]
+
+    @@map("restaurant")
+}
+
+model RestaurantProfile {
+    id          String    @id @default(uuid()) @db.Uuid
+    name        String?
+    description String?   @db.Text
+    phone       String?
+    email       String?
+    logoUrl     String?   @map("logo_url")
+    createdAt   DateTime? @map("created_at")
+
+    restaurants Restaurant[]
+
+    @@map("restaurant_profile")
+}
+
+model RestaurantOwner {
+    id        String    @id @default(uuid()) @db.Uuid
+    userId    String?   @map("user_id") @db.Uuid
+    firstName String?   @map("first_name")
+    lastName  String?   @map("last_name")
+    phone     String?
+    email     String?
+    createdAt DateTime? @map("created_at")
+
+    restaurants Restaurant[]
+
+    @@map("restaurant_owner")
+}
+
+model RestaurantSchedule {
+    id           String    @id @default(uuid()) @db.Uuid
+    restaurantId String?   @map("restaurant_id") @db.Uuid
+    dayOfWeek    Int?      @map("day_of_week")
+    openTime     DateTime? @map("open_time") @db.Time()
+    closeTime    DateTime? @map("close_time") @db.Time()
+    isClosed     Boolean?  @map("is_closed")
+
+    restaurant Restaurant? @relation(fields: [restaurantId], references: [id])
+
+    @@map("restaurant_schedule")
+}
+
+model RestaurantStatus {
+    id          String  @id @default(uuid()) @db.Uuid
+    name        String?
+    description String? @db.Text
+
+    restaurants Restaurant[]
+
+    @@map("restaurant_status")
+}
+
+model RestaurantDocument {
+    id           String    @id @default(uuid()) @db.Uuid
+    restaurantId String?   @map("restaurant_id") @db.Uuid
+    documentType String?   @map("document_type")
+    documentUrl  String?   @map("document_url")
+    verified     Boolean?
+    uploadedAt   DateTime? @map("uploaded_at")
+
+    restaurant Restaurant? @relation(fields: [restaurantId], references: [id])
+
+    @@map("restaurant_document")
+}
+
+// ──────────────────────────────────────────────
+// CUSTOMERS
+// ──────────────────────────────────────────────
+
+model Customer {
+    id        String    @id @default(uuid()) @db.Uuid
+    userId    String?   @map("user_id") @db.Uuid
+    profileId String?   @map("profile_id") @db.Uuid
+    createdAt DateTime? @map("created_at")
+
+    profile   CustomerProfile?  @relation(fields: [profileId], references: [id])
+    contacts  CustomerContact[]
+    addresses CustomerAddress[]
+    notes     CustomerNote[]
+    orders    Order[]
+
+    @@map("customer")
+}
+
+model CustomerProfile {
+    id        String    @id @default(uuid()) @db.Uuid
+    firstName String?   @map("first_name")
+    lastName  String?   @map("last_name")
+    phone     String?
+    email     String?
+    createdAt DateTime? @map("created_at")
+
+    customers Customer[]
+
+    @@map("customer_profile")
+}
+
+model CustomerContact {
+    id          String   @id @default(uuid()) @db.Uuid
+    customerId  String?  @map("customer_id") @db.Uuid
+    contactType String?  @map("contact_type")
+    value       String?
+    isPrimary   Boolean? @map("is_primary")
+
+    customer Customer? @relation(fields: [customerId], references: [id])
+
+    @@map("customer_contact")
+}
+
+model CustomerAddress {
+    id         String    @id @default(uuid()) @db.Uuid
+    customerId String?   @map("customer_id") @db.Uuid
+    locationId String?   @map("location_id") @db.Uuid
+    label      String?
+    isDefault  Boolean?  @map("is_default")
+    createdAt  DateTime? @map("created_at")
+
+    customer Customer? @relation(fields: [customerId], references: [id])
+    location Location? @relation(fields: [locationId], references: [id])
+
+    @@map("customer_address")
+}
+
+model CustomerNote {
+    id         String    @id @default(uuid()) @db.Uuid
+    customerId String?   @map("customer_id") @db.Uuid
+    note       String?   @db.Text
+    createdAt  DateTime? @map("created_at")
+
+    customer Customer? @relation(fields: [customerId], references: [id])
+
+    @@map("customer_note")
+}
+
+// ──────────────────────────────────────────────
+// COURIERS
+// ──────────────────────────────────────────────
+
+model Courier {
+    id             String    @id @default(uuid()) @db.Uuid
+    userId         String?   @map("user_id") @db.Uuid
+    profileId      String?   @map("profile_id") @db.Uuid
+    vehicleId      String?   @map("vehicle_id") @db.Uuid
+    availabilityId String?   @map("availability_id") @db.Uuid
+    status         String?
+    createdAt      DateTime? @map("created_at")
+    updatedAt      DateTime? @map("updated_at")
+
+    profile          CourierProfile?         @relation(fields: [profileId], references: [id])
+    vehicle          CourierVehicle?         @relation("CourierMainVehicle", fields: [vehicleId], references: [id])
+    availability     CourierAvailability?    @relation("CourierMainAvailability", fields: [availabilityId], references: [id])
+    vehicles         CourierVehicle[]        @relation("CourierVehicles")
+    documents        CourierDocument[]
+    zoneAssignments  CourierZoneAssignment[]
+    deliveries       Delivery[]
+    orderAssignments OrderAssignment[]
+
+    @@map("courier")
+}
+
+model CourierProfile {
+    id        String    @id @default(uuid()) @db.Uuid
+    firstName String?   @map("first_name")
+    lastName  String?   @map("last_name")
+    phone     String?
+    email     String?
+    photoUrl  String?   @map("photo_url")
+    createdAt DateTime? @map("created_at")
+
+    couriers Courier[]
+
+    @@map("courier_profile")
+}
+
+model CourierVehicle {
+    id        String    @id @default(uuid()) @db.Uuid
+    courierId String?   @map("courier_id") @db.Uuid
+    type      String?
+    brand     String?
+    model     String?
+    plate     String?
+    color     String?
+    createdAt DateTime? @map("created_at")
+
+    courier       Courier?  @relation("CourierVehicles", fields: [courierId], references: [id])
+    courierAsMain Courier[] @relation("CourierMainVehicle")
+
+    @@map("courier_vehicle")
+}
+
+model CourierDocument {
+    id           String    @id @default(uuid()) @db.Uuid
+    courierId    String?   @map("courier_id") @db.Uuid
+    documentType String?   @map("document_type")
+    documentUrl  String?   @map("document_url")
+    verified     Boolean?
+    uploadedAt   DateTime? @map("uploaded_at")
+
+    courier Courier? @relation(fields: [courierId], references: [id])
+
+    @@map("courier_document")
+}
+
+model CourierAvailability {
+    id        String    @id @default(uuid()) @db.Uuid
+    courierId String?   @map("courier_id") @db.Uuid
+    isOnline  Boolean?  @map("is_online")
+    lastSeen  DateTime? @map("last_seen")
+    updatedAt DateTime? @map("updated_at")
+
+    courierAsMain Courier[] @relation("CourierMainAvailability")
+
+    @@map("courier_availability")
+}
+
+model CourierZoneAssignment {
+    id         String    @id @default(uuid()) @db.Uuid
+    courierId  String?   @map("courier_id") @db.Uuid
+    geofenceId String?   @map("geofence_id") @db.Uuid
+    assignedAt DateTime? @map("assigned_at")
+
+    courier  Courier?  @relation(fields: [courierId], references: [id])
+    geofence Geofence? @relation(fields: [geofenceId], references: [id])
+
+    @@map("courier_zone_assignment")
+}
+
+// ──────────────────────────────────────────────
+// ORDERS
+// ──────────────────────────────────────────────
+
+model Order {
+    id           String    @id @default(uuid()) @db.Uuid
+    restaurantId String?   @map("restaurant_id") @db.Uuid
+    customerId   String?   @map("customer_id") @db.Uuid
+    deliveryId   String?   @unique @map("delivery_id") @db.Uuid
+    statusId     String?   @map("status_id") @db.Uuid
+    priorityId   String?   @map("priority_id") @db.Uuid
+    totalAmount  Decimal?  @map("total_amount")
+    deliveryFee  Decimal?  @map("delivery_fee")
+    createdAt    DateTime? @map("created_at")
+    updatedAt    DateTime? @map("updated_at")
+
+    restaurant           Restaurant?                   @relation(fields: [restaurantId], references: [id])
+    customer             Customer?                     @relation(fields: [customerId], references: [id])
+    delivery             Delivery?                     @relation("OrderCurrentDelivery", fields: [deliveryId], references: [id])
+    deliveries           Delivery[]                    @relation("DeliveryBelongsToOrder")
+    status               OrderStatus?                  @relation(fields: [statusId], references: [id])
+    priority             OrderPriority?                @relation(fields: [priorityId], references: [id])
+    items                OrderItem[]
+    statusHistories      OrderStatusHistory[]
+    notes                OrderNote[]
+    assignments          OrderAssignment[]
+    otps                 OrderOtp[]
+    incidents            OrderIncident[]
+    deliveryFees         DeliveryFee[]
+    distanceCalculations DeliveryDistanceCalculation[]
+    supportTickets       SupportTicket[]
+
+    @@map("order")
+}
+
+model OrderItem {
+    id         String   @id @default(uuid()) @db.Uuid
+    orderId    String?  @map("order_id") @db.Uuid
+    name       String?
+    quantity   Int?
+    unitPrice  Decimal? @map("unit_price")
+    totalPrice Decimal? @map("total_price")
+    note       String?  @db.Text
+
+    order Order? @relation(fields: [orderId], references: [id])
+
+    @@map("order_item")
+}
+
+model OrderStatus {
+    id          String  @id @default(uuid()) @db.Uuid
+    name        String?
+    description String? @db.Text
+
+    orders          Order[]
+    statusHistories OrderStatusHistory[]
+
+    @@map("order_status")
+}
+
+model OrderStatusHistory {
+    id        String    @id @default(uuid()) @db.Uuid
+    orderId   String?   @map("order_id") @db.Uuid
+    statusId  String?   @map("status_id") @db.Uuid
+    changedBy String?   @map("changed_by") @db.Uuid
+    changedAt DateTime? @map("changed_at")
+
+    order  Order?       @relation(fields: [orderId], references: [id])
+    status OrderStatus? @relation(fields: [statusId], references: [id])
+
+    @@map("order_status_history")
+}
+
+model OrderNote {
+    id        String    @id @default(uuid()) @db.Uuid
+    orderId   String?   @map("order_id") @db.Uuid
+    note      String?   @db.Text
+    createdBy String?   @map("created_by") @db.Uuid
+    createdAt DateTime? @map("created_at")
+
+    order Order? @relation(fields: [orderId], references: [id])
+
+    @@map("order_note")
+}
+
+model OrderPriority {
+    id          String  @id @default(uuid()) @db.Uuid
+    name        String?
+    level       Int?
+    description String? @db.Text
+
+    orders Order[]
+
+    @@map("order_priority")
+}
+
+model OrderAssignment {
+    id         String    @id @default(uuid()) @db.Uuid
+    orderId    String?   @map("order_id") @db.Uuid
+    courierId  String?   @map("courier_id") @db.Uuid
+    assignedAt DateTime? @map("assigned_at")
+    acceptedAt DateTime? @map("accepted_at")
+    rejectedAt DateTime? @map("rejected_at")
+    status     String?
+
+    order   Order?                   @relation(fields: [orderId], references: [id])
+    courier Courier?                 @relation(fields: [courierId], references: [id])
+    history OrderAssignmentHistory[]
+
+    @@map("order_assignment")
+}
+
+model OrderAssignmentHistory {
+    id                String    @id @default(uuid()) @db.Uuid
+    orderAssignmentId String?   @map("order_assignment_id") @db.Uuid
+    status            String?
+    changedBy         String?   @map("changed_by") @db.Uuid
+    changedAt         DateTime? @map("changed_at")
+    note              String?   @db.Text
+
+    orderAssignment OrderAssignment? @relation(fields: [orderAssignmentId], references: [id])
+
+    @@map("order_assignment_history")
+}
+
+model OrderDispatchRule {
+    id                  String    @id @default(uuid()) @db.Uuid
+    name                String?
+    description         String?   @db.Text
+    priority            Int?
+    maxDistanceKm       Decimal?  @map("max_distance_km")
+    maxOrdersPerCourier Int?      @map("max_orders_per_courier")
+    isActive            Boolean?  @map("is_active")
+    createdAt           DateTime? @map("created_at")
+
+    @@map("order_dispatch_rule")
+}
+
+model OrderOtp {
+    id        String    @id @default(uuid()) @db.Uuid
+    orderId   String?   @map("order_id") @db.Uuid
+    otpCode   String?   @map("otp_code")
+    expiresAt DateTime? @map("expires_at")
+    createdAt DateTime? @map("created_at")
+
+    order         Order?                 @relation(fields: [orderId], references: [id])
+    verifications OrderOtpVerification[]
+
+    @@map("order_otp")
+}
+
+model OrderOtpVerification {
+    id         String    @id @default(uuid()) @db.Uuid
+    orderOtpId String?   @map("order_otp_id") @db.Uuid
+    verifiedBy String?   @map("verified_by") @db.Uuid
+    verifiedAt DateTime? @map("verified_at")
+    success    Boolean?
+
+    orderOtp OrderOtp? @relation(fields: [orderOtpId], references: [id])
+
+    @@map("order_otp_verification")
+}
+
+model OrderIncident {
+    id             String    @id @default(uuid()) @db.Uuid
+    orderId        String?   @map("order_id") @db.Uuid
+    incidentTypeId String?   @map("incident_type_id") @db.Uuid
+    reportedBy     String?   @map("reported_by") @db.Uuid
+    description    String?   @db.Text
+    status         String?
+    createdAt      DateTime? @map("created_at")
+
+    order        Order?             @relation(fields: [orderId], references: [id])
+    incidentType OrderIncidentType? @relation(fields: [incidentTypeId], references: [id])
+
+    @@map("order_incident")
+}
+
+model OrderIncidentType {
+    id          String  @id @default(uuid()) @db.Uuid
+    name        String?
+    description String? @db.Text
+
+    incidents OrderIncident[]
+
+    @@map("order_incident_type")
+}
+
+// ──────────────────────────────────────────────
+// DELIVERIES
+// ──────────────────────────────────────────────
+
+model DeliveryRoute {
+    id                       String    @id @default(uuid()) @db.Uuid
+    deliveryId               String?   @map("delivery_id") @db.Uuid
+    originLocationId         String?   @map("origin_location_id") @db.Uuid
+    destinationLocationId    String?   @map("destination_location_id") @db.Uuid
+    distanceKm               Decimal?  @map("distance_km")
+    estimatedDurationMinutes Int?      @map("estimated_duration_minutes")
+    createdAt                DateTime? @map("created_at")
+
+    delivery    Delivery? @relation(fields: [deliveryId], references: [id])
+    origin      Location? @relation("RouteOrigin", fields: [originLocationId], references: [id])
+    destination Location? @relation("RouteDestination", fields: [destinationLocationId], references: [id])
+
+    @@map("delivery_route")
+}
+
+model DeliveryStatus {
+    id          String  @id @default(uuid()) @db.Uuid
+    name        String?
+    description String? @db.Text
+
+    statusHistories DeliveryStatusHistory[]
+
+    @@map("delivery_status")
+}
+
+model DeliveryStatusHistory {
+    id         String    @id @default(uuid()) @db.Uuid
+    deliveryId String?   @map("delivery_id") @db.Uuid
+    statusId   String?   @map("status_id") @db.Uuid
+    changedBy  String?   @map("changed_by") @db.Uuid
+    changedAt  DateTime? @map("changed_at")
+
+    delivery Delivery?       @relation(fields: [deliveryId], references: [id])
+    status   DeliveryStatus? @relation(fields: [statusId], references: [id])
+
+    @@map("delivery_status_history")
+}
+
+model DeliveryProof {
+    id         String    @id @default(uuid()) @db.Uuid
+    deliveryId String?   @map("delivery_id") @db.Uuid
+    proofType  String?   @map("proof_type")
+    fileUrl    String?   @map("file_url")
+    capturedAt DateTime? @map("captured_at")
+
+    delivery Delivery? @relation(fields: [deliveryId], references: [id])
+
+    @@map("delivery_proof")
+}
+
+model DeliveryRate {
+    id       String   @id @default(uuid()) @db.Uuid
+    name     String?
+    baseFee  Decimal? @map("base_fee")
+    perKmFee Decimal? @map("per_km_fee")
+    currency String?
+    isActive Boolean? @map("is_active")
+
+    rules DeliveryRateRule[]
+    fees  DeliveryFee[]
+
+    @@map("delivery_rate")
+}
+
+model DeliveryRateRule {
+    id            String    @id @default(uuid()) @db.Uuid
+    rateId        String?   @map("rate_id") @db.Uuid
+    geofenceId    String?   @map("geofence_id") @db.Uuid
+    minDistanceKm Decimal?  @map("min_distance_km")
+    maxDistanceKm Decimal?  @map("max_distance_km")
+    multiplier    Decimal?
+    createdAt     DateTime? @map("created_at")
+
+    rate     DeliveryRate? @relation(fields: [rateId], references: [id])
+    geofence Geofence?     @relation(fields: [geofenceId], references: [id])
+
+    @@map("delivery_rate_rule")
+}
+
+model DeliveryFee {
+    id            String    @id @default(uuid()) @db.Uuid
+    orderId       String?   @map("order_id") @db.Uuid
+    rateId        String?   @map("rate_id") @db.Uuid
+    calculatedFee Decimal?  @map("calculated_fee")
+    calculatedAt  DateTime? @map("calculated_at")
+
+    order Order?        @relation(fields: [orderId], references: [id])
+    rate  DeliveryRate? @relation(fields: [rateId], references: [id])
+
+    @@map("delivery_fee")
+}
+
+model DeliveryDistanceCalculation {
+    id                    String    @id @default(uuid()) @db.Uuid
+    orderId               String?   @map("order_id") @db.Uuid
+    originLocationId      String?   @map("origin_location_id") @db.Uuid
+    destinationLocationId String?   @map("destination_location_id") @db.Uuid
+    distanceKm            Decimal?  @map("distance_km")
+    durationMinutes       Int?      @map("duration_minutes")
+    calculatedAt          DateTime? @map("calculated_at")
+
+    order       Order?    @relation(fields: [orderId], references: [id])
+    origin      Location? @relation("DistanceOrigin", fields: [originLocationId], references: [id])
+    destination Location? @relation("DistanceDestination", fields: [destinationLocationId], references: [id])
+
+    @@map("delivery_distance_calculation")
+}
+
+// ──────────────────────────────────────────────
+// SUPPORT
+// ──────────────────────────────────────────────
+
+model SupportTicket {
+    id        String    @id @default(uuid()) @db.Uuid
+    userId    String?   @map("user_id") @db.Uuid
+    orderId   String?   @map("order_id") @db.Uuid
+    subject   String?
+    status    String?
+    createdAt DateTime? @map("created_at")
+    closedAt  DateTime? @map("closed_at")
+
+    user   User?                @relation(fields: [userId], references: [id])
+    order  Order?               @relation(fields: [orderId], references: [id])
+    events SupportTicketEvent[]
+
+    @@map("support_ticket")
+}
+
+model SupportTicketEvent {
+    id        String    @id @default(uuid()) @db.Uuid
+    ticketId  String?   @map("ticket_id") @db.Uuid
+    eventType String?   @map("event_type")
+    message   String?   @db.Text
+    createdBy String?   @map("created_by") @db.Uuid
+    createdAt DateTime? @map("created_at")
+
+    ticket SupportTicket? @relation(fields: [ticketId], references: [id])
+
+    @@map("support_ticket_event")
+}
