@@ -4,9 +4,215 @@ import {
   SalesReportResult,
   PerformanceReportResult,
   FinancialReportResult,
+  ReportSummaryResult,
 } from "../../domain/repositories/reports.repository";
 
 export class PrismaReportsRepository implements IReportsRepository {
+  async getSummary(
+    startDate: Date,
+    endDate: Date,
+  ): Promise<ReportSummaryResult> {
+    const [orders, deliveries, incidents] = await Promise.all([
+      prisma.order.findMany({
+        where: {
+          createdAt: { gte: startDate, lte: endDate },
+        },
+        include: {
+          status: true,
+          restaurant: {
+            include: {
+              profile: true,
+            },
+          },
+        },
+      }),
+      prisma.delivery.findMany({
+        where: {
+          startedAt: { gte: startDate, lte: endDate },
+        },
+        include: {
+          courier: {
+            include: {
+              profile: true,
+            },
+          },
+          order: {
+            select: {
+              deliveryFee: true,
+            },
+          },
+        },
+      }),
+      prisma.orderIncident.findMany({
+        where: {
+          createdAt: { gte: startDate, lte: endDate },
+        },
+        include: {
+          order: {
+            select: {
+              restaurantId: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    const totalOrders = orders.length;
+    const totalRevenue = orders.reduce(
+      (acc, order) => acc + Number(order.totalAmount ?? 0),
+      0,
+    );
+    const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+
+    const completedDeliveries = deliveries.filter(
+      (delivery) => delivery.startedAt && delivery.completedAt,
+    );
+    const averageDeliveryTime =
+      completedDeliveries.length > 0
+        ? completedDeliveries.reduce((acc, delivery) => {
+            return (
+              acc +
+              (delivery.completedAt!.getTime() - delivery.startedAt!.getTime()) /
+                60000
+            );
+          }, 0) / completedDeliveries.length
+        : 0;
+
+    const totalIncidents = incidents.length;
+    const incidentRate = totalOrders > 0 ? (totalIncidents / totalOrders) * 100 : 0;
+
+    const dailyRevenueMap = new Map<string, { revenue: number; orderCount: number }>();
+    const orderStatusMap = new Map<string, number>();
+    const topRestaurantMap = new Map<
+      string,
+      {
+        name: string;
+        orderCount: number;
+        revenue: number;
+        totalIncidents: number;
+      }
+    >();
+
+    for (const order of orders) {
+      const day = order.createdAt
+        ? order.createdAt.toISOString().split("T")[0]
+        : "Sin fecha";
+      const dayEntry = dailyRevenueMap.get(day) ?? { revenue: 0, orderCount: 0 };
+      dayEntry.revenue += Number(order.totalAmount ?? 0);
+      dayEntry.orderCount += 1;
+      dailyRevenueMap.set(day, dayEntry);
+
+      const statusName = (order.status?.name ?? "SIN_ESTADO").toUpperCase();
+      orderStatusMap.set(statusName, (orderStatusMap.get(statusName) ?? 0) + 1);
+
+      const restaurantId = order.restaurantId ?? "unknown";
+      const restaurantEntry = topRestaurantMap.get(restaurantId) ?? {
+        name: order.restaurant?.profile?.name ?? "Sin nombre",
+        orderCount: 0,
+        revenue: 0,
+        totalIncidents: 0,
+      };
+
+      restaurantEntry.orderCount += 1;
+      restaurantEntry.revenue += Number(order.totalAmount ?? 0);
+      topRestaurantMap.set(restaurantId, restaurantEntry);
+    }
+
+    for (const incident of incidents) {
+      const restaurantId = incident.order?.restaurantId ?? "unknown";
+      const restaurantEntry = topRestaurantMap.get(restaurantId) ?? {
+        name: "Sin nombre",
+        orderCount: 0,
+        revenue: 0,
+        totalIncidents: 0,
+      };
+
+      restaurantEntry.totalIncidents += 1;
+      topRestaurantMap.set(restaurantId, restaurantEntry);
+    }
+
+    const riderMap = new Map<
+      string,
+      { name: string; totalDeliveries: number; completedDeliveries: number; totalEarnings: number }
+    >();
+
+    for (const delivery of deliveries) {
+      const riderId = delivery.courierId ?? "unknown";
+      const riderEntry = riderMap.get(riderId) ?? {
+        name: delivery.courier?.profile
+          ? `${delivery.courier.profile.firstName ?? ""} ${delivery.courier.profile.lastName ?? ""}`.trim() || "Desconocido"
+          : "Desconocido",
+        totalDeliveries: 0,
+        completedDeliveries: 0,
+        totalEarnings: 0,
+      };
+
+      riderEntry.totalDeliveries += 1;
+
+      if (delivery.completedAt) {
+        riderEntry.completedDeliveries += 1;
+        riderEntry.totalEarnings += Number(delivery.order?.deliveryFee ?? 0);
+      }
+
+      riderMap.set(riderId, riderEntry);
+    }
+
+    return {
+      periodStart: startDate.toISOString(),
+      periodEnd: endDate.toISOString(),
+      kpis: {
+        totalOrders,
+        totalRevenue: Math.round(totalRevenue * 100) / 100,
+        averageOrderValue: Math.round(averageOrderValue * 100) / 100,
+        averageDeliveryTime: Math.round(averageDeliveryTime * 100) / 100,
+        totalIncidents,
+        incidentRate: Math.round(incidentRate * 100) / 100,
+      },
+      dailyRevenue: Array.from(dailyRevenueMap.entries())
+        .map(([date, value]) => ({
+          date,
+          revenue: Math.round(value.revenue * 100) / 100,
+          orderCount: value.orderCount,
+        }))
+        .sort((a, b) => a.date.localeCompare(b.date)),
+      orderStatusBreakdown: Array.from(orderStatusMap.entries())
+        .map(([status, count]) => ({
+          status,
+          count,
+          percentage:
+            totalOrders > 0 ? Math.round(((count / totalOrders) * 100) * 100) / 100 : 0,
+        }))
+        .sort((a, b) => b.count - a.count),
+      topRestaurants: Array.from(topRestaurantMap.entries())
+        .map(([restaurantId, value]) => ({
+          restaurantId,
+          name: value.name,
+          orderCount: value.orderCount,
+          revenue: Math.round(value.revenue * 100) / 100,
+          totalIncidents: value.totalIncidents,
+          incidentRate:
+            value.orderCount > 0
+              ? Math.round(((value.totalIncidents / value.orderCount) * 100) * 100) / 100
+              : 0,
+        }))
+        .sort((a, b) => b.revenue - a.revenue)
+        .slice(0, 5),
+      topRiders: Array.from(riderMap.entries())
+        .map(([riderId, value]) => ({
+          riderId,
+          name: value.name,
+          completedDeliveries: value.completedDeliveries,
+          totalEarnings: Math.round(value.totalEarnings * 100) / 100,
+          completionRate:
+            value.totalDeliveries > 0
+              ? Math.round(((value.completedDeliveries / value.totalDeliveries) * 100) * 100) / 100
+              : 0,
+        }))
+        .sort((a, b) => b.completedDeliveries - a.completedDeliveries)
+        .slice(0, 5),
+    };
+  }
+
   async getSalesReport(
     startDate: Date,
     endDate: Date,

@@ -14,6 +14,16 @@ function parseDateRange(req: Request): { startDate: Date; endDate: Date } {
 }
 
 export class ReportsController {
+  static async summary(req: Request, res: Response) {
+    try {
+      const { startDate, endDate } = parseDateRange(req);
+      const report = await repo.getSummary(startDate, endDate);
+      res.json(report);
+    } catch (error) {
+      res.status(500).json({ error: "Error al generar resumen de reportes" });
+    }
+  }
+
   static async sales(req: Request, res: Response) {
     try {
       const { startDate, endDate } = parseDateRange(req);

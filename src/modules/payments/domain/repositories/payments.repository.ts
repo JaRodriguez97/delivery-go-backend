@@ -31,6 +31,13 @@ export interface PaymentsKpis {
   refundedAmount: number;
 }
 
+export interface PaymentsDashboardKpis extends PaymentsKpis {
+  ridersPendingAmount: number;
+  restaurantsPendingAmount: number;
+  platformCommissionAmount: number;
+  deliveredOrders: number;
+}
+
 export interface InvoiceListItem {
   id: string;
   invoiceNumber: string;
@@ -41,6 +48,43 @@ export interface InvoiceListItem {
   dueDate: Date | null;
 }
 
+export interface PaymentMethodListItem {
+  id: string;
+  code: string;
+  name: string;
+  methodType: string;
+  requiresGateway: boolean;
+  allowsInstallments: boolean;
+}
+
+export interface PaymentTransactionItem {
+  id: string;
+  reference: string;
+  concept: string;
+  beneficiary: string;
+  type: "Entrada" | "Salida";
+  amount: number;
+  currency: string;
+  status: string;
+  occurredAt: Date | null;
+}
+
+export interface PaymentsDashboardCollection<T> {
+  data: T[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+export interface PaymentsDashboardResponse {
+  kpis: PaymentsDashboardKpis;
+  payments: PaymentsDashboardCollection<PaymentListItem>;
+  invoices: PaymentsDashboardCollection<InvoiceListItem>;
+  paymentMethods: PaymentMethodListItem[];
+  transactions: PaymentsDashboardCollection<PaymentTransactionItem>;
+}
+
 export interface PaymentFilters {
   search?: string;
   status?: string;
@@ -49,11 +93,16 @@ export interface PaymentFilters {
 
 export interface IPaymentsRepository {
   getKpis(): Promise<PaymentsKpis>;
+  getDashboard(
+    filters: PaymentFilters,
+    pagination: { page: number; skip: number; limit: number },
+  ): Promise<PaymentsDashboardResponse>;
   getPayments(
     filters: PaymentFilters,
     pagination: { skip: number; limit: number },
   ): Promise<{ data: PaymentListItem[]; total: number }>;
   getPaymentById(id: string): Promise<PaymentDetail | null>;
+  getPaymentMethods(): Promise<PaymentMethodListItem[]>;
   processPayment(data: {
     invoiceId: string;
     paymentMethodId: string;
@@ -61,12 +110,27 @@ export interface IPaymentsRepository {
     currency?: string;
     externalReference?: string;
     notes?: string;
-  }): Promise<{ id: string; paymentNumber: string }>;
+    createdBy?: string;
+  }): Promise<{
+    id: string;
+    paymentNumber: string;
+    status: string;
+    paidAt: Date | null;
+  }>;
+  completePayment(
+    paymentId: string,
+    userId?: string,
+  ): Promise<{
+    id: string;
+    paymentNumber: string;
+    status: string;
+    paidAt: Date | null;
+  }>;
   refundPayment(
     paymentId: string,
     data: { amount: number; reason?: string },
     userId?: string,
-  ): Promise<{ id: string; refundNumber: string }>;
+  ): Promise<{ id: string; refundNumber: string; status: string }>;
   getInvoices(pagination: {
     skip: number;
     limit: number;

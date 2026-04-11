@@ -26,6 +26,17 @@ export class TariffsController {
     }
   }
 
+  static async history(req: Request, res: Response) {
+    try {
+      const rawLimit = Number(req.query.limit);
+      const limit = Number.isFinite(rawLimit) ? rawLimit : 20;
+      const history = await repo.getTariffChangeHistory(limit);
+      res.json({ data: history });
+    } catch (error) {
+      res.status(500).json({ error: "Error al obtener historial de tarifas" });
+    }
+  }
+
   static async create(req: Request, res: Response) {
     try {
       const result = await repo.createTariff(req.body);
@@ -56,6 +67,11 @@ export class TariffsController {
   static async calculate(req: Request, res: Response) {
     try {
       const distance = Number(req.query.distance);
+      if (!Number.isFinite(distance) || distance < 0) {
+        res.status(400).json({ error: "Distancia inválida" });
+        return;
+      }
+
       const result = await repo.calculateFee(distance);
       if (!result) {
         res.status(404).json({ error: "No hay tarifa activa configurada" });

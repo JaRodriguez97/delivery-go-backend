@@ -200,6 +200,67 @@ async function main() {
   console.log(`  ✔ ${priorities.length} order priorities`);
 
   // ─── Payment methods ───
+  const removedMethodCodes = ["BANK_TRANSFER", "NEQUI", "DAVIPLATA"];
+
+  const removedMethods = await prisma.paymentMethod.findMany({
+    where: { code: { in: removedMethodCodes } },
+    select: { id: true, code: true },
+  });
+
+  if (removedMethods.length > 0) {
+    const removedMethodIds = removedMethods.map((method) => method.id);
+
+    const paymentsUsingRemovedMethods = await prisma.payment.findMany({
+      where: { paymentMethodId: { in: removedMethodIds } },
+      select: { id: true },
+    });
+
+    const paymentIds = paymentsUsingRemovedMethods.map((payment) => payment.id);
+
+    await prisma.$transaction(async (tx) => {
+      if (paymentIds.length > 0) {
+        const gatewayTransactions = await tx.gatewayTransaction.findMany({
+          where: { paymentId: { in: paymentIds } },
+          select: { id: true },
+        });
+
+        const gatewayTransactionIds = gatewayTransactions.map(
+          (transaction) => transaction.id,
+        );
+
+        if (gatewayTransactionIds.length > 0) {
+          await tx.gatewayEvent.deleteMany({
+            where: {
+              gatewayTransactionId: { in: gatewayTransactionIds },
+            },
+          });
+        }
+
+        await tx.gatewayTransaction.deleteMany({
+          where: { paymentId: { in: paymentIds } },
+        });
+        await tx.refund.deleteMany({
+          where: { paymentId: { in: paymentIds } },
+        });
+        await tx.paymentReference.deleteMany({
+          where: { paymentId: { in: paymentIds } },
+        });
+        await tx.paymentApplication.deleteMany({
+          where: { paymentId: { in: paymentIds } },
+        });
+        await tx.payment.deleteMany({ where: { id: { in: paymentIds } } });
+      }
+
+      await tx.paymentMethod.deleteMany({
+        where: { id: { in: removedMethodIds } },
+      });
+    });
+
+    console.log(
+      `  ✔ Removed deprecated methods: ${removedMethods.map((m) => m.code).join(", ")}`,
+    );
+  }
+
   const methods = [
     { code: "CASH", name: "Efectivo", methodType: "CASH" as const },
     {
@@ -209,19 +270,8 @@ async function main() {
       requiresGateway: true,
     },
     {
-      code: "BANK_TRANSFER",
-      name: "Transferencia bancaria",
-      methodType: "BANK_TRANSFER" as const,
-    },
-    {
-      code: "NEQUI",
-      name: "Nequi",
-      methodType: "ONLINE_GATEWAY" as const,
-      requiresGateway: true,
-    },
-    {
-      code: "DAVIPLATA",
-      name: "Daviplata",
+      code: "PSE",
+      name: "PSE (Pagos Seguros en Línea)",
       methodType: "ONLINE_GATEWAY" as const,
       requiresGateway: true,
     },
@@ -229,7 +279,11 @@ async function main() {
   for (const m of methods) {
     await prisma.paymentMethod.upsert({
       where: { code: m.code },
-      update: {},
+      update: {
+        name: m.name,
+        methodType: m.methodType,
+        requiresGateway: m.requiresGateway ?? false,
+      },
       create: { ...m, createdAt: new Date() },
     });
   }

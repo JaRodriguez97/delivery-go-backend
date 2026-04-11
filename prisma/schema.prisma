@@ -1745,17 +1745,41 @@ model DeliveryProof {
 }
 
 model DeliveryRate {
-    id       String   @id @default(uuid()) @db.Uuid
-    name     String?
-    baseFee  Decimal? @map("base_fee")
-    perKmFee Decimal? @map("per_km_fee")
-    currency String?
-    isActive Boolean? @map("is_active")
+    id                    String    @id @default(uuid()) @db.Uuid
+    name                  String?
+    description           String?   @db.Text
+    baseFee               Decimal?  @map("base_fee")
+    perKmFee              Decimal?  @map("per_km_fee")
+    minimumFee            Decimal?  @map("minimum_fee")
+    maximumFee            Decimal?  @map("maximum_fee")
+    minimumRadiusKm       Decimal?  @map("minimum_radius_km")
+    autoRounding          String?   @map("auto_rounding")
+    dynamicPricingEnabled Boolean?  @map("dynamic_pricing_enabled")
+    currency              String?
+    isActive              Boolean?  @map("is_active")
+    createdAt             DateTime? @map("created_at")
+    updatedAt             DateTime? @map("updated_at")
 
-    rules DeliveryRateRule[]
-    fees  DeliveryFee[]
+    rules      DeliveryRateRule[]
+    fees       DeliveryFee[]
+    changeLogs DeliveryRateChangeLog[]
 
     @@map("delivery_rate")
+}
+
+model DeliveryRateChangeLog {
+    id               String    @id @default(uuid()) @db.Uuid
+    rateId           String?   @map("rate_id") @db.Uuid
+    previousBaseFee  Decimal?  @map("previous_base_fee")
+    newBaseFee       Decimal?  @map("new_base_fee")
+    previousPerKmFee Decimal?  @map("previous_per_km_fee")
+    newPerKmFee      Decimal?  @map("new_per_km_fee")
+    changedBy        String?   @map("changed_by") @db.Uuid
+    changedAt        DateTime? @map("changed_at")
+
+    rate DeliveryRate? @relation(fields: [rateId], references: [id])
+
+    @@map("delivery_rate_change_log")
 }
 
 model DeliveryRateRule {

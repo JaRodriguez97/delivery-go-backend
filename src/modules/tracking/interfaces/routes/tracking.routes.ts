@@ -6,6 +6,7 @@ const router = Router();
 
 router.use(authenticationMiddleware);
 
+router.get("/active-deliveries", TrackingController.listActiveDeliveries);
 router.get("/order/:id", TrackingController.trackOrder);
 router.get("/rider/:id", TrackingController.trackRider);
 router.get("/route/:id", TrackingController.getDeliveryRoute);

@@ -12,6 +12,7 @@ const router = Router();
 router.use(authenticationMiddleware);
 
 router.get("/calculate", TariffsController.calculate);
+router.get("/history", TariffsController.history);
 router.get("/", TariffsController.list);
 router.get("/:id", TariffsController.getById);
 router.post("/", validate(createTariffSchema), TariffsController.create);

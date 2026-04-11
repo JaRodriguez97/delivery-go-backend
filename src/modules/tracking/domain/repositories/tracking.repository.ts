@@ -39,7 +39,32 @@ export interface RoutePointResult {
   address?: string;
 }
 
+export type ActiveDeliveryFilter = "ALL" | "ONLINE" | "OFFLINE" | "IN_DELIVERY";
+
+export interface ActiveDeliveryResult {
+  deliveryId: string;
+  orderId: string;
+  status: string;
+  elapsedMinutes: number | null;
+  riderId: string | null;
+  riderName: string | null;
+  riderAvatarUrl: string | null;
+  isRiderOnline: boolean;
+  pickupAddress: string | null;
+  destinationAddress: string | null;
+  riderLocation: {
+    latitude: number;
+    longitude: number;
+    timestamp: Date;
+  } | null;
+}
+
 export interface ITrackingRepository {
+  getActiveDeliveries(params?: {
+    search?: string;
+    filter?: ActiveDeliveryFilter;
+    limit?: number;
+  }): Promise<ActiveDeliveryResult[]>;
   getOrderTracking(orderId: string): Promise<OrderTrackingResult | null>;
   getRiderTracking(riderId: string): Promise<RiderTrackingResult | null>;
   getDeliveryRoute(orderId: string): Promise<RoutePointResult[]>;

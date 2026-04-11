@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { PrismaSupportRepository } from "../../infrastructure/repositories/prisma-support.repository";
 import { parsePagination } from "../../../../shared/utils/pagination";
+import { AuthenticatedRequest } from "../../../../shared/types/authenticated-request";
 
 const repo = new PrismaSupportRepository();
 
@@ -35,9 +36,14 @@ export class SupportController {
     }
   }
 
-  static async create(req: Request, res: Response) {
+  static async create(req: AuthenticatedRequest, res: Response) {
     try {
-      const userId = (req as any).user?.id;
+      const userId = req.user?.userId;
+      if (!userId) {
+        res.status(401).json({ error: "No autenticado" });
+        return;
+      }
+
       const result = await repo.createTicket(req.body, userId);
       res.status(201).json(result);
     } catch (error) {
@@ -45,9 +51,14 @@ export class SupportController {
     }
   }
 
-  static async close(req: Request, res: Response) {
+  static async close(req: AuthenticatedRequest, res: Response) {
     try {
-      const userId = (req as any).user?.id;
+      const userId = req.user?.userId;
+      if (!userId) {
+        res.status(401).json({ error: "No autenticado" });
+        return;
+      }
+
       await repo.closeTicket(
         req.params.id as string,
         req.body.resolution,
@@ -59,9 +70,14 @@ export class SupportController {
     }
   }
 
-  static async addComment(req: Request, res: Response) {
+  static async addComment(req: AuthenticatedRequest, res: Response) {
     try {
-      const userId = (req as any).user?.id;
+      const userId = req.user?.userId;
+      if (!userId) {
+        res.status(401).json({ error: "No autenticado" });
+        return;
+      }
+
       const result = await repo.addComment(
         req.params.id as string,
         req.body.comment,
