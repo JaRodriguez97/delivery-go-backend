@@ -1,34 +1,67 @@
 import { prisma } from "../../../../shared/config/database";
+import { Prisma } from "@prisma/client";
 import {
   IReportsRepository,
   SalesReportResult,
   PerformanceReportResult,
   FinancialReportResult,
   ReportSummaryResult,
+  ReportSummaryFilters,
+  ReportSummaryFilterMetadata,
 } from "../../domain/repositories/reports.repository";
 
 export class PrismaReportsRepository implements IReportsRepository {
-  async getSummary(
-    startDate: Date,
-    endDate: Date,
-  ): Promise<ReportSummaryResult> {
-    const [orders, deliveries, incidents] = await Promise.all([
-      prisma.order.findMany({
-        where: {
-          createdAt: { gte: startDate, lte: endDate },
-        },
-        include: {
-          status: true,
-          restaurant: {
-            include: {
-              profile: true,
+  private buildSummaryOrderWhere(
+    filters: ReportSummaryFilters,
+  ): Prisma.OrderWhereInput {
+    const where: Prisma.OrderWhereInput = {
+      createdAt: { gte: filters.startDate, lte: filters.endDate },
+    };
+
+    if (filters.restaurantId) {
+      where.restaurantId = filters.restaurantId;
+    }
+
+    if (filters.paymentMethodId) {
+      where.invoice = {
+        is: {
+          payments: {
+            some: {
+              paymentMethodId: filters.paymentMethodId,
+              deletedAt: null,
             },
           },
         },
-      }),
+      };
+    }
+
+    return where;
+  }
+
+  async getSummary(
+    filters: ReportSummaryFilters,
+  ): Promise<ReportSummaryResult> {
+    const orderWhere = this.buildSummaryOrderWhere(filters);
+
+    const orders = await prisma.order.findMany({
+      where: orderWhere,
+      include: {
+        status: true,
+        restaurant: {
+          include: {
+            profile: true,
+          },
+        },
+      },
+    });
+
+    const orderIds = orders.map((order) => order.id);
+
+    const [deliveries, incidents] = await Promise.all([
       prisma.delivery.findMany({
         where: {
-          startedAt: { gte: startDate, lte: endDate },
+          orderId: { in: orderIds },
+          startedAt: { gte: filters.startDate, lte: filters.endDate },
         },
         include: {
           courier: {
@@ -45,7 +78,8 @@ export class PrismaReportsRepository implements IReportsRepository {
       }),
       prisma.orderIncident.findMany({
         where: {
-          createdAt: { gte: startDate, lte: endDate },
+          orderId: { in: orderIds },
+          createdAt: { gte: filters.startDate, lte: filters.endDate },
         },
         include: {
           order: {
@@ -72,16 +106,21 @@ export class PrismaReportsRepository implements IReportsRepository {
         ? completedDeliveries.reduce((acc, delivery) => {
             return (
               acc +
-              (delivery.completedAt!.getTime() - delivery.startedAt!.getTime()) /
+              (delivery.completedAt!.getTime() -
+                delivery.startedAt!.getTime()) /
                 60000
             );
           }, 0) / completedDeliveries.length
         : 0;
 
     const totalIncidents = incidents.length;
-    const incidentRate = totalOrders > 0 ? (totalIncidents / totalOrders) * 100 : 0;
+    const incidentRate =
+      totalOrders > 0 ? (totalIncidents / totalOrders) * 100 : 0;
 
-    const dailyRevenueMap = new Map<string, { revenue: number; orderCount: number }>();
+    const dailyRevenueMap = new Map<
+      string,
+      { revenue: number; orderCount: number }
+    >();
     const orderStatusMap = new Map<string, number>();
     const topRestaurantMap = new Map<
       string,
@@ -97,7 +136,10 @@ export class PrismaReportsRepository implements IReportsRepository {
       const day = order.createdAt
         ? order.createdAt.toISOString().split("T")[0]
         : "Sin fecha";
-      const dayEntry = dailyRevenueMap.get(day) ?? { revenue: 0, orderCount: 0 };
+      const dayEntry = dailyRevenueMap.get(day) ?? {
+        revenue: 0,
+        orderCount: 0,
+      };
       dayEntry.revenue += Number(order.totalAmount ?? 0);
       dayEntry.orderCount += 1;
       dailyRevenueMap.set(day, dayEntry);
@@ -133,14 +175,20 @@ export class PrismaReportsRepository implements IReportsRepository {
 
     const riderMap = new Map<
       string,
-      { name: string; totalDeliveries: number; completedDeliveries: number; totalEarnings: number }
+      {
+        name: string;
+        totalDeliveries: number;
+        completedDeliveries: number;
+        totalEarnings: number;
+      }
     >();
 
     for (const delivery of deliveries) {
       const riderId = delivery.courierId ?? "unknown";
       const riderEntry = riderMap.get(riderId) ?? {
         name: delivery.courier?.profile
-          ? `${delivery.courier.profile.firstName ?? ""} ${delivery.courier.profile.lastName ?? ""}`.trim() || "Desconocido"
+          ? `${delivery.courier.profile.firstName ?? ""} ${delivery.courier.profile.lastName ?? ""}`.trim() ||
+            "Desconocido"
           : "Desconocido",
         totalDeliveries: 0,
         completedDeliveries: 0,
@@ -158,8 +206,8 @@ export class PrismaReportsRepository implements IReportsRepository {
     }
 
     return {
-      periodStart: startDate.toISOString(),
-      periodEnd: endDate.toISOString(),
+      periodStart: filters.startDate.toISOString(),
+      periodEnd: filters.endDate.toISOString(),
       kpis: {
         totalOrders,
         totalRevenue: Math.round(totalRevenue * 100) / 100,
@@ -180,7 +228,9 @@ export class PrismaReportsRepository implements IReportsRepository {
           status,
           count,
           percentage:
-            totalOrders > 0 ? Math.round(((count / totalOrders) * 100) * 100) / 100 : 0,
+            totalOrders > 0
+              ? Math.round((count / totalOrders) * 100 * 100) / 100
+              : 0,
         }))
         .sort((a, b) => b.count - a.count),
       topRestaurants: Array.from(topRestaurantMap.entries())
@@ -192,7 +242,9 @@ export class PrismaReportsRepository implements IReportsRepository {
           totalIncidents: value.totalIncidents,
           incidentRate:
             value.orderCount > 0
-              ? Math.round(((value.totalIncidents / value.orderCount) * 100) * 100) / 100
+              ? Math.round(
+                  (value.totalIncidents / value.orderCount) * 100 * 100,
+                ) / 100
               : 0,
         }))
         .sort((a, b) => b.revenue - a.revenue)
@@ -205,11 +257,58 @@ export class PrismaReportsRepository implements IReportsRepository {
           totalEarnings: Math.round(value.totalEarnings * 100) / 100,
           completionRate:
             value.totalDeliveries > 0
-              ? Math.round(((value.completedDeliveries / value.totalDeliveries) * 100) * 100) / 100
+              ? Math.round(
+                  (value.completedDeliveries / value.totalDeliveries) *
+                    100 *
+                    100,
+                ) / 100
               : 0,
         }))
         .sort((a, b) => b.completedDeliveries - a.completedDeliveries)
         .slice(0, 5),
+    };
+  }
+
+  async getSummaryFilterMetadata(): Promise<ReportSummaryFilterMetadata> {
+    const [restaurants, paymentMethods] = await Promise.all([
+      prisma.restaurant.findMany({
+        select: {
+          id: true,
+          profile: {
+            select: {
+              name: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: "asc",
+        },
+      }),
+      prisma.paymentMethod.findMany({
+        where: {
+          status: "ACTIVE",
+        },
+        select: {
+          id: true,
+          name: true,
+        },
+        orderBy: {
+          name: "asc",
+        },
+      }),
+    ]);
+
+    return {
+      restaurants: restaurants.map((restaurant) => ({
+        id: restaurant.id,
+        name:
+          restaurant.profile?.name?.trim() ||
+          `Restaurante ${restaurant.id.slice(0, 8).toUpperCase()}`,
+      })),
+      paymentMethods: paymentMethods.map((method) => ({
+        id: method.id,
+        name: method.name,
+      })),
     };
   }
 

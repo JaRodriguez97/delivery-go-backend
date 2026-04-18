@@ -456,6 +456,7 @@ model Invoice {
     invoiceNumber     String        @map("invoice_number") @db.VarChar(50)
     invoiceTypeId     String        @map("invoice_type_id") @db.Uuid
     userId            String?       @map("user_id") @db.Uuid
+    orderId           String?       @unique @map("order_id") @db.Uuid
     currency          String        @default("COP") @db.VarChar(10)
     subtotalAmount    Decimal       @default(0) @map("subtotal_amount") @db.Decimal(14, 2)
     discountAmount    Decimal       @default(0) @map("discount_amount") @db.Decimal(14, 2)
@@ -473,6 +474,7 @@ model Invoice {
     invoiceSequence     InvoiceSequence      @relation(fields: [invoiceSequenceId], references: [id])
     invoiceType         InvoiceType          @relation(fields: [invoiceTypeId], references: [id])
     user                User?                @relation("InvoiceUser", fields: [userId], references: [id])
+    order               Order?               @relation("OrderInvoice", fields: [orderId], references: [id])
     creator             User?                @relation("InvoiceCreatedBy", fields: [createdBy], references: [id])
     items               InvoiceItem[]
     adjustments         InvoiceAdjustment[]
@@ -889,6 +891,24 @@ model FinancialSetting {
     defaultTax     Tax?            @relation(fields: [defaultTaxId], references: [id])
 
     @@map("financial_setting")
+}
+
+model SystemSetting {
+    id                                   String    @id @default(uuid()) @db.Uuid
+    key                                  String    @unique @db.VarChar(50)
+    operationCity                        String    @default("Cali, Valle del Cauca") @map("operation_city") @db.VarChar(150)
+    timezone                             String    @default("America/Bogota") @db.VarChar(100)
+    language                             String    @default("es") @db.VarChar(10)
+    logoUrl                              String?   @map("logo_url") @db.VarChar(255)
+    platformCommissionPercent            Decimal   @default(15) @map("platform_commission_percent") @db.Decimal(5, 2)
+    fixedCommissionPerOrder              Decimal   @default(0) @map("fixed_commission_per_order") @db.Decimal(14, 2)
+    differentiatedCommissionByRestaurant Boolean   @default(false) @map("differentiated_commission_by_restaurant")
+    withholdRiderAutomatically           Boolean   @default(true) @map("withhold_rider_automatically")
+    settlementMethod                     String    @default("AUTOMATIC") @map("settlement_method") @db.VarChar(20)
+    createdAt                            DateTime  @map("created_at")
+    updatedAt                            DateTime? @map("updated_at")
+
+    @@map("system_setting")
 }
 
 model Tax {
@@ -1521,6 +1541,7 @@ model Order {
     customer             Customer?                     @relation(fields: [customerId], references: [id])
     delivery             Delivery?                     @relation("OrderCurrentDelivery", fields: [deliveryId], references: [id])
     deliveries           Delivery[]                    @relation("DeliveryBelongsToOrder")
+    invoice              Invoice?                      @relation("OrderInvoice")
     status               OrderStatus?                  @relation(fields: [statusId], references: [id])
     priority             OrderPriority?                @relation(fields: [priorityId], references: [id])
     items                OrderItem[]

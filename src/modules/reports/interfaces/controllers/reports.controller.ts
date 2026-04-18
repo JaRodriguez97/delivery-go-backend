@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { PrismaReportsRepository } from "../../infrastructure/repositories/prisma-reports.repository";
+import { ReportSummaryFilters } from "../../domain/repositories/reports.repository";
 
 const repo = new PrismaReportsRepository();
 
@@ -13,14 +14,45 @@ function parseDateRange(req: Request): { startDate: Date; endDate: Date } {
   return { startDate, endDate };
 }
 
+function parseOptionalFilterValue(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function parseSummaryFilters(req: Request): ReportSummaryFilters {
+  const { startDate, endDate } = parseDateRange(req);
+
+  return {
+    startDate,
+    endDate,
+    restaurantId: parseOptionalFilterValue(req.query.restaurantId),
+    paymentMethodId: parseOptionalFilterValue(req.query.paymentMethodId),
+  };
+}
+
 export class ReportsController {
   static async summary(req: Request, res: Response) {
     try {
-      const { startDate, endDate } = parseDateRange(req);
-      const report = await repo.getSummary(startDate, endDate);
+      const filters = parseSummaryFilters(req);
+      const report = await repo.getSummary(filters);
       res.json(report);
     } catch (error) {
       res.status(500).json({ error: "Error al generar resumen de reportes" });
+    }
+  }
+
+  static async summaryFilters(_req: Request, res: Response) {
+    try {
+      const metadata = await repo.getSummaryFilterMetadata();
+      res.json(metadata);
+    } catch (error) {
+      res
+        .status(500)
+        .json({ error: "Error al cargar filtros del resumen de reportes" });
     }
   }
 

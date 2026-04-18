@@ -2,6 +2,7 @@ export interface PaymentListItem {
   id: string;
   paymentNumber: string;
   invoiceNumber: string;
+  orderId: string | null;
   paymentMethod: string;
   amount: number;
   currency: string;
@@ -35,12 +36,14 @@ export interface PaymentsDashboardKpis extends PaymentsKpis {
   ridersPendingAmount: number;
   restaurantsPendingAmount: number;
   platformCommissionAmount: number;
+  platformCommissionPercent: number;
   deliveredOrders: number;
 }
 
 export interface InvoiceListItem {
   id: string;
   invoiceNumber: string;
+  orderId: string | null;
   totalAmount: number;
   currency: string;
   status: string;
@@ -60,6 +63,7 @@ export interface PaymentMethodListItem {
 export interface PaymentTransactionItem {
   id: string;
   reference: string;
+  orderId: string | null;
   concept: string;
   beneficiary: string;
   type: "Entrada" | "Salida";

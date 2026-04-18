@@ -14,7 +14,8 @@ import {
 import { Prisma } from "@prisma/client";
 
 export class PrismaPaymentsRepository implements IPaymentsRepository {
-  private readonly platformCommissionRate = 0.15;
+  private readonly defaultPlatformCommissionPercent = 15;
+  private readonly defaultFixedCommissionPerOrder = 0;
   private readonly removedMethodCodes = [
     "BANK_TRANSFER",
     "NEQUI",
@@ -76,6 +77,30 @@ export class PrismaPaymentsRepository implements IPaymentsRepository {
     return Math.round(value * 100) / 100;
   }
 
+  private async getCommissionConfiguration() {
+    const settings = await prisma.systemSetting.findUnique({
+      where: { key: "DEFAULT" },
+      select: {
+        platformCommissionPercent: true,
+        fixedCommissionPerOrder: true,
+      },
+    });
+
+    const percent = Number(
+      settings?.platformCommissionPercent ??
+        this.defaultPlatformCommissionPercent,
+    );
+    const fixed = Number(
+      settings?.fixedCommissionPerOrder ?? this.defaultFixedCommissionPerOrder,
+    );
+
+    return {
+      percentValue: this.roundCurrency(Math.max(0, percent)),
+      percentRate: Math.max(0, percent) / 100,
+      fixedPerOrder: Math.max(0, fixed),
+    };
+  }
+
   private buildDashboardCollection<T>(
     data: T[],
     total: number,
@@ -97,9 +122,12 @@ export class PrismaPaymentsRepository implements IPaymentsRepository {
       | "ridersPendingAmount"
       | "restaurantsPendingAmount"
       | "platformCommissionAmount"
+      | "platformCommissionPercent"
       | "deliveredOrders"
     >
   > {
+    const commissionConfig = await this.getCommissionConfiguration();
+
     const orders = await prisma.order.findMany({
       select: {
         totalAmount: true,
@@ -123,8 +151,10 @@ export class PrismaPaymentsRepository implements IPaymentsRepository {
     for (const order of deliveredOrders) {
       const restaurantGross = Number(order.totalAmount ?? 0);
       const riderAmount = Number(order.deliveryFee ?? 0);
-      const platformCommission = this.roundCurrency(
-        restaurantGross * this.platformCommissionRate,
+      const variableCommission = restaurantGross * commissionConfig.percentRate;
+      const platformCommission = Math.min(
+        restaurantGross,
+        this.roundCurrency(variableCommission + commissionConfig.fixedPerOrder),
       );
       const restaurantNet = Math.max(
         0,
@@ -140,6 +170,7 @@ export class PrismaPaymentsRepository implements IPaymentsRepository {
       ridersPendingAmount: this.roundCurrency(ridersPendingAmount),
       restaurantsPendingAmount: this.roundCurrency(restaurantsPendingAmount),
       platformCommissionAmount: this.roundCurrency(platformCommissionAmount),
+      platformCommissionPercent: commissionConfig.percentValue,
       deliveredOrders: deliveredOrders.length,
     };
   }
@@ -213,6 +244,7 @@ export class PrismaPaymentsRepository implements IPaymentsRepository {
           invoice: {
             select: {
               invoiceNumber: true,
+              orderId: true,
               party: {
                 select: {
                   fullName: true,
@@ -234,6 +266,7 @@ export class PrismaPaymentsRepository implements IPaymentsRepository {
               invoice: {
                 select: {
                   invoiceNumber: true,
+                  orderId: true,
                   party: {
                     select: {
                       fullName: true,
@@ -250,6 +283,7 @@ export class PrismaPaymentsRepository implements IPaymentsRepository {
     const paymentItems: PaymentTransactionItem[] = payments.map((payment) => ({
       id: `payment-${payment.id}`,
       reference: payment.paymentNumber,
+      orderId: payment.invoice.orderId,
       concept:
         payment.status === "PENDING" || payment.status === "PROCESSING"
           ? "Pago pendiente de confirmacion"
@@ -267,6 +301,7 @@ export class PrismaPaymentsRepository implements IPaymentsRepository {
     const refundItems: PaymentTransactionItem[] = refunds.map((refund) => ({
       id: `refund-${refund.id}`,
       reference: refund.refundNumber,
+      orderId: refund.payment.invoice.orderId,
       concept: refund.reason?.trim() || "Reembolso procesado",
       beneficiary:
         refund.payment.invoice.party?.fullName ??
@@ -415,7 +450,7 @@ export class PrismaPaymentsRepository implements IPaymentsRepository {
       prisma.payment.findMany({
         where,
         include: {
-          invoice: { select: { invoiceNumber: true } },
+          invoice: { select: { invoiceNumber: true, orderId: true } },
           paymentMethod: { select: { name: true } },
         },
         skip: pagination.skip,
@@ -430,6 +465,7 @@ export class PrismaPaymentsRepository implements IPaymentsRepository {
         id: p.id,
         paymentNumber: p.paymentNumber,
         invoiceNumber: p.invoice.invoiceNumber,
+        orderId: p.invoice.orderId,
         paymentMethod: p.paymentMethod.name,
         amount: Number(p.amount),
         currency: p.currency,
@@ -445,7 +481,7 @@ export class PrismaPaymentsRepository implements IPaymentsRepository {
     const p = await prisma.payment.findUnique({
       where: { id },
       include: {
-        invoice: { select: { invoiceNumber: true } },
+        invoice: { select: { invoiceNumber: true, orderId: true } },
         paymentMethod: { select: { name: true } },
         refunds: true,
       },
@@ -458,6 +494,7 @@ export class PrismaPaymentsRepository implements IPaymentsRepository {
       paymentNumber: p.paymentNumber,
       invoiceId: p.invoiceId,
       invoiceNumber: p.invoice.invoiceNumber,
+      orderId: p.invoice.orderId,
       paymentMethod: p.paymentMethod.name,
       amount: Number(p.amount),
       currency: p.currency,
@@ -833,6 +870,7 @@ export class PrismaPaymentsRepository implements IPaymentsRepository {
       data: data.map((i) => ({
         id: i.id,
         invoiceNumber: i.invoiceNumber,
+        orderId: i.orderId,
         totalAmount: Number(i.totalAmount),
         currency: i.currency,
         status: i.status,

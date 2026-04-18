@@ -3,6 +3,7 @@ import express from "express";
 import helmet from "helmet";
 import morgan from "morgan";
 import rateLimit from "express-rate-limit";
+import path from "path";
 import { errorHandler } from "./middlewares/error.middleware";
 import { prisma } from "./config/database";
 import { authRoutes } from "../modules/auth/interfaces/routes/auth.routes";
@@ -36,7 +37,6 @@ async function connectDB(retries = 5) {
 
 connectDB();
 
-
 export function createServer() {
   const app = express();
 
@@ -44,6 +44,14 @@ export function createServer() {
   app.use(cors());
   app.use(express.json());
   app.use(morgan("dev"));
+  app.use(
+    "/uploads",
+    (_req, res, next) => {
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      next();
+    },
+    express.static(path.join(process.cwd(), "uploads")),
+  );
 
   app.use(
     rateLimit({

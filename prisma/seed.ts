@@ -1,7 +1,139 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { createHash } from "crypto";
 
 const prisma = new PrismaClient();
+
+const SHARED_ADMIN_PASSWORD = "Admin123!";
+
+type AdminSeedUser = {
+  email: string;
+  firstName: string;
+  lastName: string;
+  documentType: "CC" | "CE" | "PASSPORT" | "TI" | "NIT";
+  documentNumber: string;
+};
+
+function buildDocumentNumberHash(value: string) {
+  return createHash("sha256").update(value.trim()).digest("hex");
+}
+
+async function ensureAdminUser(
+  adminRoleId: string,
+  passwordHash: string,
+  seedUser: AdminSeedUser,
+) {
+  const existingUser = await prisma.user.findUnique({
+    where: { email: seedUser.email },
+    select: { id: true },
+  });
+
+  const user = existingUser
+    ? await prisma.user.update({
+        where: { id: existingUser.id },
+        data: {
+          passwordHash,
+          status: "ACTIVE",
+          emailVerified: true,
+          updatedAt: new Date(),
+        },
+        select: { id: true },
+      })
+    : await prisma.user.create({
+        data: {
+          email: seedUser.email,
+          passwordHash,
+          status: "ACTIVE",
+          emailVerified: true,
+          createdAt: new Date(),
+        },
+        select: { id: true },
+      });
+
+  const baseHash = buildDocumentNumberHash(seedUser.documentNumber);
+  const currentProfile = await prisma.userProfile.findUnique({
+    where: { userId: user.id },
+    select: { id: true, documentNumberHash: true },
+  });
+
+  const conflictingProfile = await prisma.userProfile.findUnique({
+    where: { documentNumberHash: baseHash },
+    select: { userId: true },
+  });
+
+  const documentNumberHash =
+    conflictingProfile && conflictingProfile.userId !== user.id
+      ? buildDocumentNumberHash(
+          `${seedUser.documentNumber}:${seedUser.email.toLowerCase()}`,
+        )
+      : baseHash;
+
+  if (
+    currentProfile &&
+    currentProfile.documentNumberHash !== documentNumberHash
+  ) {
+    await prisma.userProfile.update({
+      where: { id: currentProfile.id },
+      data: {
+        firstName: seedUser.firstName,
+        lastName: seedUser.lastName,
+        documentType: seedUser.documentType,
+        documentNumberEncrypted: Buffer.from(seedUser.documentNumber),
+        documentNumberHash,
+        updatedAt: new Date(),
+      },
+    });
+  } else {
+    await prisma.userProfile.upsert({
+      where: { userId: user.id },
+      update: {
+        firstName: seedUser.firstName,
+        lastName: seedUser.lastName,
+        documentType: seedUser.documentType,
+        documentNumberEncrypted: Buffer.from(seedUser.documentNumber),
+        documentNumberHash,
+        updatedAt: new Date(),
+      },
+      create: {
+        userId: user.id,
+        firstName: seedUser.firstName,
+        lastName: seedUser.lastName,
+        documentType: seedUser.documentType,
+        documentNumberEncrypted: Buffer.from(seedUser.documentNumber),
+        documentNumberHash,
+        createdAt: new Date(),
+      },
+    });
+  }
+
+  const roleLink = await prisma.userRole.findFirst({
+    where: { userId: user.id, roleId: adminRoleId },
+    select: { id: true },
+  });
+
+  if (roleLink) {
+    await prisma.userRole.update({
+      where: { id: roleLink.id },
+      data: {
+        status: "ACTIVE",
+        deletedAt: null,
+      },
+    });
+  } else {
+    await prisma.userRole.create({
+      data: {
+        userId: user.id,
+        roleId: adminRoleId,
+        assignedAt: new Date(),
+      },
+    });
+  }
+
+  return {
+    email: seedUser.email,
+    wasCreated: !existingUser,
+  };
+}
 
 async function main() {
   console.log("🌱 Seeding database...");
@@ -80,43 +212,34 @@ async function main() {
   }
   console.log(`  ✔ Admin role → all permissions`);
 
-  // ─── Admin user ───
-  const adminEmail = "jarg.contacto@gmail.com";
-  let adminUser = await prisma.user.findUnique({
-    where: { email: adminEmail },
-  });
-  if (!adminUser) {
-    const passwordHash = await bcrypt.hash("Admin123!", 10);
-    adminUser = await prisma.user.create({
-      data: {
-        email: adminEmail,
-        passwordHash,
-        status: "ACTIVE",
-        emailVerified: true,
-        createdAt: new Date(),
-      },
-    });
-    await prisma.userProfile.create({
-      data: {
-        userId: adminUser.id,
-        firstName: "Admin",
-        lastName: "DeliveryGO",
-        documentType: "CC",
-        documentNumberEncrypted: Buffer.from("0000000000"),
-        documentNumberHash: "0".repeat(64),
-        createdAt: new Date(),
-      },
-    });
-    await prisma.userRole.create({
-      data: {
-        userId: adminUser.id,
-        roleId: adminRole.id,
-        assignedAt: new Date(),
-      },
-    });
-    console.log(`  ✔ Admin user created: ${adminEmail} / Admin123!`);
-  } else {
-    console.log(`  ✔ Admin user already exists`);
+  // ─── Admin users ───
+  const adminSeedUsers: AdminSeedUser[] = [
+    {
+      email: "jarg.contacto@gmail.com",
+      firstName: "Jesus",
+      lastName: "Rodriguez",
+      documentType: "CC",
+      documentNumber: "1151962759",
+    },
+    {
+      email: "deliverygot.com@gmail.com",
+      firstName: "Luis Anderson",
+      lastName: "Enriquez",
+      documentType: "CC",
+      documentNumber: "1111111111",
+    },
+  ];
+
+  const sharedAdminPasswordHash = await bcrypt.hash(SHARED_ADMIN_PASSWORD, 10);
+  for (const adminSeedUser of adminSeedUsers) {
+    const result = await ensureAdminUser(
+      adminRole.id,
+      sharedAdminPasswordHash,
+      adminSeedUser,
+    );
+    console.log(
+      `  ✔ Admin ${result.wasCreated ? "created" : "updated"}: ${result.email} / ${SHARED_ADMIN_PASSWORD}`,
+    );
   }
 
   // ─── Order statuses ───
@@ -200,64 +323,18 @@ async function main() {
   console.log(`  ✔ ${priorities.length} order priorities`);
 
   // ─── Payment methods ───
-  const removedMethodCodes = ["BANK_TRANSFER", "NEQUI", "DAVIPLATA"];
-
-  const removedMethods = await prisma.paymentMethod.findMany({
-    where: { code: { in: removedMethodCodes } },
-    select: { id: true, code: true },
+  const deprecatedMethodCodes = ["BANK_TRANSFER", "NEQUI", "DAVIPLATA"];
+  const deprecatedUpdate = await prisma.paymentMethod.updateMany({
+    where: { code: { in: deprecatedMethodCodes } },
+    data: {
+      status: "INACTIVE",
+      updatedAt: new Date(),
+    },
   });
 
-  if (removedMethods.length > 0) {
-    const removedMethodIds = removedMethods.map((method) => method.id);
-
-    const paymentsUsingRemovedMethods = await prisma.payment.findMany({
-      where: { paymentMethodId: { in: removedMethodIds } },
-      select: { id: true },
-    });
-
-    const paymentIds = paymentsUsingRemovedMethods.map((payment) => payment.id);
-
-    await prisma.$transaction(async (tx) => {
-      if (paymentIds.length > 0) {
-        const gatewayTransactions = await tx.gatewayTransaction.findMany({
-          where: { paymentId: { in: paymentIds } },
-          select: { id: true },
-        });
-
-        const gatewayTransactionIds = gatewayTransactions.map(
-          (transaction) => transaction.id,
-        );
-
-        if (gatewayTransactionIds.length > 0) {
-          await tx.gatewayEvent.deleteMany({
-            where: {
-              gatewayTransactionId: { in: gatewayTransactionIds },
-            },
-          });
-        }
-
-        await tx.gatewayTransaction.deleteMany({
-          where: { paymentId: { in: paymentIds } },
-        });
-        await tx.refund.deleteMany({
-          where: { paymentId: { in: paymentIds } },
-        });
-        await tx.paymentReference.deleteMany({
-          where: { paymentId: { in: paymentIds } },
-        });
-        await tx.paymentApplication.deleteMany({
-          where: { paymentId: { in: paymentIds } },
-        });
-        await tx.payment.deleteMany({ where: { id: { in: paymentIds } } });
-      }
-
-      await tx.paymentMethod.deleteMany({
-        where: { id: { in: removedMethodIds } },
-      });
-    });
-
+  if (deprecatedUpdate.count > 0) {
     console.log(
-      `  ✔ Removed deprecated methods: ${removedMethods.map((m) => m.code).join(", ")}`,
+      `  ✔ Deprecated methods marked inactive: ${deprecatedMethodCodes.join(", ")}`,
     );
   }
 
@@ -319,6 +396,50 @@ async function main() {
     });
   }
   console.log(`  ✔ ${invoiceTypes.length} invoice types`);
+
+  // ─── Business entity + invoice sequence for delivery orders ───
+  const businessEntity = await prisma.businessEntity.upsert({
+    where: { documentNumber: "900999000-1" },
+    update: {},
+    create: {
+      legalName: "Delivery GO SAS",
+      tradeName: "Delivery GO",
+      documentType: "NIT",
+      documentNumber: "900999000-1",
+      status: "ACTIVE",
+      createdAt: new Date(),
+    },
+  });
+
+  const deliveryInvoiceType = await prisma.invoiceType.findUnique({
+    where: { code: "DELIVERY_FEE" },
+    select: { id: true },
+  });
+
+  if (deliveryInvoiceType) {
+    const existingSequence = await prisma.invoiceSequence.findFirst({
+      where: {
+        businessEntityId: businessEntity.id,
+        invoiceTypeId: deliveryInvoiceType.id,
+        status: "ACTIVE",
+      },
+      select: { id: true },
+    });
+
+    if (!existingSequence) {
+      await prisma.invoiceSequence.create({
+        data: {
+          businessEntityId: businessEntity.id,
+          invoiceTypeId: deliveryInvoiceType.id,
+          prefix: "DOM",
+          currentNumber: 0,
+          status: "ACTIVE",
+          createdAt: new Date(),
+        },
+      });
+    }
+  }
+  console.log("  ✔ business entity and delivery invoice sequence");
 
   console.log("\n✅ Seed completed!");
 }

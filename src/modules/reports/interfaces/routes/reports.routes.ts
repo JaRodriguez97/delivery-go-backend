@@ -6,6 +6,7 @@ const router = Router();
 
 router.use(authenticationMiddleware);
 
+router.get("/summary/filters", ReportsController.summaryFilters);
 router.get("/summary", ReportsController.summary);
 router.get("/sales", ReportsController.sales);
 router.get("/performance", ReportsController.performance);

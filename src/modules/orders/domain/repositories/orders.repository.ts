@@ -3,6 +3,24 @@ import {
   PaginatedResponse,
 } from "../../../../shared/utils/pagination";
 
+export type OrderPaymentStatus =
+  | "NOT_INVOICED"
+  | "UNPAID"
+  | "PARTIALLY_PAID"
+  | "PAID";
+
+export interface OrderFinancialSummary {
+  hasInvoice: boolean;
+  invoiceId: string | null;
+  invoiceNumber: string | null;
+  invoiceStatus: string | null;
+  paymentStatus: OrderPaymentStatus;
+  totalInvoiced: number;
+  totalPaid: number;
+  pendingAmount: number;
+  isFullyPaid: boolean;
+}
+
 export interface OrderListItem {
   id: string;
   restaurantName: string;
@@ -11,6 +29,7 @@ export interface OrderListItem {
   status: string;
   totalAmount: number;
   deliveryFee: number;
+  financial: OrderFinancialSummary;
   createdAt: Date;
 }
 
@@ -39,6 +58,7 @@ export interface OrderDetail {
     status: string;
     createdAt: Date;
   }[];
+  financial: OrderFinancialSummary;
   createdAt: Date;
   updatedAt: Date | null;
 }
@@ -78,7 +98,7 @@ export interface IOrdersRepository {
       unitPrice: number;
       note?: string;
     }[];
-  }): Promise<{ id: string }>;
+  }): Promise<{ id: string; invoiceId: string; invoiceNumber: string }>;
   updateOrder(
     id: string,
     data: { statusId?: string; priorityId?: string; courierId?: string },

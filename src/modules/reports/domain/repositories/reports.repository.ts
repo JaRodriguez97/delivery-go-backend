@@ -83,6 +83,23 @@ export interface ReportSummaryResult {
   topRiders: ReportSummaryTopRiderItem[];
 }
 
+export interface ReportSummaryFilters {
+  startDate: Date;
+  endDate: Date;
+  restaurantId?: string;
+  paymentMethodId?: string;
+}
+
+export interface ReportFilterOption {
+  id: string;
+  name: string;
+}
+
+export interface ReportSummaryFilterMetadata {
+  restaurants: ReportFilterOption[];
+  paymentMethods: ReportFilterOption[];
+}
+
 export interface IReportsRepository {
   getSalesReport(startDate: Date, endDate: Date): Promise<SalesReportResult>;
   getPerformanceReport(
@@ -93,5 +110,6 @@ export interface IReportsRepository {
     startDate: Date,
     endDate: Date,
   ): Promise<FinancialReportResult>;
-  getSummary(startDate: Date, endDate: Date): Promise<ReportSummaryResult>;
+  getSummary(filters: ReportSummaryFilters): Promise<ReportSummaryResult>;
+  getSummaryFilterMetadata(): Promise<ReportSummaryFilterMetadata>;
 }

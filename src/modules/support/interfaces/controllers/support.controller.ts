@@ -5,6 +5,15 @@ import { AuthenticatedRequest } from "../../../../shared/types/authenticated-req
 
 const repo = new PrismaSupportRepository();
 
+function parseOptionalDate(value: unknown): Date | undefined {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return undefined;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+}
+
 export class SupportController {
   static async list(req: Request, res: Response) {
     try {
@@ -12,12 +21,11 @@ export class SupportController {
       const filters = {
         search: req.query.search as string | undefined,
         status: req.query.status as string | undefined,
+        type: req.query.type as string | undefined,
+        createdDate: parseOptionalDate(req.query.createdDate),
       };
-      const [kpis, result] = await Promise.all([
-        repo.getKpis(),
-        repo.getTickets(filters, pagination),
-      ]);
-      res.json({ kpis, ...result });
+      const dashboard = await repo.getDashboard(filters, pagination);
+      res.json(dashboard);
     } catch (error) {
       res.status(500).json({ error: "Error al obtener tickets" });
     }
