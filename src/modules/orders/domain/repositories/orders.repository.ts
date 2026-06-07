@@ -87,9 +87,12 @@ export interface IOrdersRepository {
     pagination: PaginationParams,
   ): Promise<PaginatedResponse<OrderListItem>>;
   getOrderById(id: string): Promise<OrderDetail | null>;
+  getAvailableOrders(courierId: string): Promise<OrderListItem[]>;
   createOrder(data: {
-    restaurantId: string;
-    customerId: string;
+    restaurantId?: string;
+    customerId?: string;
+    customerName?: string;
+    customerPhone?: string;
     priorityId?: string;
     deliveryFee?: number;
     items: {
@@ -103,5 +106,8 @@ export interface IOrdersRepository {
     id: string,
     data: { statusId?: string; priorityId?: string; courierId?: string },
   ): Promise<void>;
+  acceptAssignment(orderId: string, courierId: string): Promise<void>;
+  rejectAssignment(orderId: string, courierId: string): Promise<void>;
+  updateDeliveryStatus(orderId: string, status: string): Promise<void>;
   deleteOrder(id: string): Promise<void>;
 }

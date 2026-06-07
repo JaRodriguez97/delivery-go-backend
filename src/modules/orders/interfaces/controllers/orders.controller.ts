@@ -1,5 +1,7 @@
 import { Request, Response } from "express";
 import { PrismaOrdersRepository } from "../../infrastructure/repositories/prisma-orders.repository";
+import { prisma } from "../../../../shared/config/database";
+import { AuthenticatedRequest } from "../../../../shared/types/authenticated-request";
 import { GetOrdersUseCase } from "../../application/use-cases/get-orders.use-case";
 import { GetOrderByIdUseCase } from "../../application/use-cases/get-order-by-id.use-case";
 import { CreateOrderUseCase } from "../../application/use-cases/create-order.use-case";
@@ -15,6 +17,35 @@ const updateOrder = new UpdateOrderUseCase(repo);
 const deleteOrder = new DeleteOrderUseCase(repo);
 
 export class OrdersController {
+  static async available(req: AuthenticatedRequest, res: Response) {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        res.status(401).json({ error: "No autenticado" });
+        return;
+      }
+
+      const courier = await prisma.courier.findFirst({
+        where: { userId },
+        select: { id: true },
+      });
+
+      if (!courier) {
+        res.status(404).json({ error: "Repartidor no encontrado" });
+        return;
+      }
+
+      const data = await repo.getAvailableOrders(courier.id);
+      res.json({ data });
+    } catch (error: any) {
+      res
+        .status(500)
+        .json({
+          error: error?.message || "Error al obtener pedidos disponibles",
+        });
+    }
+  }
+
   static async list(req: Request, res: Response) {
     try {
       const pagination = parsePagination(req);
@@ -50,7 +81,18 @@ export class OrdersController {
 
   static async create(req: Request, res: Response) {
     try {
-      const result = await createOrder.execute(req.body);
+      const payload = { ...req.body } as any;
+      const authReq = req as AuthenticatedRequest;
+
+      if (!payload.restaurantId && authReq.user?.userId) {
+        const restaurant = await prisma.restaurant.findFirst({
+          where: { owner: { userId: authReq.user.userId } },
+          select: { id: true },
+        });
+        payload.restaurantId = restaurant?.id;
+      }
+
+      const result = await createOrder.execute(payload);
       res.status(201).json(result);
     } catch (error) {
       res.status(500).json({ error: "Error al crear pedido" });
@@ -72,6 +114,83 @@ export class OrdersController {
       res.json({ message: "Pedido cancelado" });
     } catch (error) {
       res.status(500).json({ error: "Error al cancelar pedido" });
+    }
+  }
+
+  static async acceptAssignment(req: AuthenticatedRequest, res: Response) {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        res.status(401).json({ error: "No autenticado" });
+        return;
+      }
+
+      const courier = await prisma.courier.findFirst({
+        where: { userId },
+        select: { id: true },
+      });
+
+      if (!courier) {
+        res.status(404).json({ error: "Repartidor no encontrado" });
+        return;
+      }
+
+      await repo.acceptAssignment(req.params.id as string, courier.id);
+      res.json({ message: "Servicio aceptado" });
+    } catch (error: any) {
+      res
+        .status(400)
+        .json({
+          error: error?.message || "No fue posible aceptar el servicio",
+        });
+    }
+  }
+
+  static async rejectAssignment(req: AuthenticatedRequest, res: Response) {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        res.status(401).json({ error: "No autenticado" });
+        return;
+      }
+
+      const courier = await prisma.courier.findFirst({
+        where: { userId },
+        select: { id: true },
+      });
+
+      if (!courier) {
+        res.status(404).json({ error: "Repartidor no encontrado" });
+        return;
+      }
+
+      await repo.rejectAssignment(req.params.id as string, courier.id);
+      res.json({ message: "Servicio rechazado" });
+    } catch (error: any) {
+      res
+        .status(400)
+        .json({
+          error: error?.message || "No fue posible rechazar el servicio",
+        });
+    }
+  }
+
+  static async updateDeliveryStatus(req: AuthenticatedRequest, res: Response) {
+    try {
+      const status = req.body?.status as string | undefined;
+      if (!status) {
+        res.status(400).json({ error: "status es requerido" });
+        return;
+      }
+
+      await repo.updateDeliveryStatus(req.params.id as string, status);
+      res.json({ message: "Estado de entrega actualizado" });
+    } catch (error: any) {
+      res
+        .status(400)
+        .json({
+          error: error?.message || "No fue posible actualizar el estado",
+        });
     }
   }
 }

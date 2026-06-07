@@ -11,9 +11,13 @@ const router = Router();
 
 router.use(authenticationMiddleware);
 
+router.get("/available", OrdersController.available);
 router.get("/", OrdersController.list);
-router.get("/:id", OrdersController.getById);
 router.post("/", validate(createOrderSchema), OrdersController.create);
+router.patch("/:id/assignment/accept", OrdersController.acceptAssignment);
+router.patch("/:id/assignment/reject", OrdersController.rejectAssignment);
+router.patch("/:id/delivery-status", OrdersController.updateDeliveryStatus);
+router.get("/:id", OrdersController.getById);
 router.put("/:id", validate(updateOrderSchema), OrdersController.update);
 router.delete("/:id", OrdersController.remove);
 

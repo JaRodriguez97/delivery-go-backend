@@ -46,7 +46,19 @@ export class LoginUseCase {
         ipAddress: meta.ipAddress,
         userAgent: meta.userAgent,
       });
-      throw new AuthError("Cuenta inactiva o suspendida", 403);
+      if (user.status === "PENDING") {
+        throw new AuthError(
+          "Tu cuenta está en proceso de verificación. Por favor aguarda la aprobación del administrador.",
+          403,
+          "ACCOUNT_PENDING",
+        );
+      }
+
+      throw new AuthError(
+        "Cuenta inactiva o suspendida",
+        403,
+        "ACCOUNT_INACTIVE",
+      );
     }
 
     const passwordValid = await comparePassword(
@@ -103,6 +115,7 @@ export class AuthError extends Error {
   constructor(
     message: string,
     public statusCode: number,
+    public code?: string,
   ) {
     super(message);
     this.name = "AuthError";

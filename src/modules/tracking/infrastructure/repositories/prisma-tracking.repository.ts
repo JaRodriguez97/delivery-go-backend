@@ -37,20 +37,49 @@ export class PrismaTrackingRepository implements ITrackingRepository {
           isNot: null,
         },
       },
-      include: {
-        status: true,
+      select: {
+        id: true,
+        createdAt: true,
+        status: {
+          select: {
+            name: true,
+          },
+        },
         restaurant: {
-          include: {
-            profile: true,
+          select: {
+            profile: {
+              select: {
+                name: true,
+              },
+            },
           },
         },
         delivery: {
-          include: {
-            trackingLatest: true,
+          select: {
+            id: true,
+            status: true,
+            courierId: true,
+            trackingLatest: {
+              select: {
+                latitude: true,
+                longitude: true,
+                recordedAt: true,
+              },
+            },
             courier: {
-              include: {
-                profile: true,
-                availability: true,
+              select: {
+                profile: {
+                  select: {
+                    firstName: true,
+                    lastName: true,
+                    photoUrl: true,
+                  },
+                },
+                availability: {
+                  select: {
+                    isOnline: true,
+                  },
+                },
               },
             },
             routes: {
@@ -58,18 +87,24 @@ export class PrismaTrackingRepository implements ITrackingRepository {
               orderBy: {
                 createdAt: "desc",
               },
-              include: {
+              select: {
                 origin: {
-                  include: {
+                  select: {
                     addresses: {
                       take: 1,
+                      select: {
+                        street: true,
+                      },
                     },
                   },
                 },
                 destination: {
-                  include: {
+                  select: {
                     addresses: {
                       take: 1,
+                      select: {
+                        street: true,
+                      },
                     },
                   },
                 },
@@ -177,17 +212,40 @@ export class PrismaTrackingRepository implements ITrackingRepository {
   async getOrderTracking(orderId: string): Promise<OrderTrackingResult | null> {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
-      include: {
-        status: true,
+      select: {
+        id: true,
+        status: {
+          select: {
+            name: true,
+          },
+        },
         delivery: {
-          include: {
-            trackingLatest: true,
+          select: {
+            courierId: true,
+            trackingLatest: {
+              select: {
+                latitude: true,
+                longitude: true,
+                recordedAt: true,
+              },
+            },
             courier: {
-              include: { profile: true },
+              select: {
+                profile: {
+                  select: {
+                    firstName: true,
+                    lastName: true,
+                  },
+                },
+              },
             },
             routes: {
               take: 1,
               orderBy: { createdAt: "desc" },
+              select: {
+                estimatedDurationMinutes: true,
+                distanceKm: true,
+              },
             },
           },
         },
@@ -276,17 +334,41 @@ export class PrismaTrackingRepository implements ITrackingRepository {
   async getDeliveryRoute(orderId: string): Promise<RoutePointResult[]> {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
-      include: {
+      select: {
         delivery: {
-          include: {
+          select: {
             routes: {
-              include: {
-                origin: { include: { addresses: true } },
-                destination: { include: { addresses: true } },
+              select: {
+                origin: {
+                  select: {
+                    addresses: {
+                      select: {
+                        latitude: true,
+                        longitude: true,
+                        street: true,
+                      },
+                    },
+                  },
+                },
+                destination: {
+                  select: {
+                    addresses: {
+                      select: {
+                        latitude: true,
+                        longitude: true,
+                        street: true,
+                      },
+                    },
+                  },
+                },
               },
             },
             trackingHistory: {
               orderBy: { recordedAt: "asc" },
+              select: {
+                latitude: true,
+                longitude: true,
+              },
             },
           },
         },

@@ -1,10 +1,47 @@
 import { Request, Response } from "express";
+import bcrypt from "bcryptjs";
 import { PrismaRidersRepository } from "../../infrastructure/repositories/prisma-riders.repository";
 import { parsePagination } from "../../../../shared/utils/pagination";
 
 const repo = new PrismaRidersRepository();
 
 export class RidersController {
+  static async register(req: Request, res: Response) {
+    try {
+      const requestFiles = req.files as
+        | Express.Multer.File[]
+        | { [fieldname: string]: Express.Multer.File[] }
+        | undefined;
+
+      const filesArray = Array.isArray(requestFiles)
+        ? requestFiles
+        : Object.values(requestFiles ?? {}).flat();
+
+      const files = Object.fromEntries(
+        filesArray.map((file) => [file.fieldname, file]),
+      );
+
+      const data = req.body;
+      const passwordHash = await bcrypt.hash(data.password, 10);
+
+      const result = await repo.registerRider({
+        ...data,
+        passwordHash,
+        files,
+      });
+
+      res.status(201).json({
+        message: "Registro enviado para revision manual",
+        riderId: result.id,
+      });
+    } catch (error: any) {
+      console.log("🚀 ~ RidersController ~ register ~ error:", error);
+      res.status(500).json({
+        error: error?.message || "Error al registrar repartidor",
+      });
+    }
+  }
+
   static async list(req: Request, res: Response) {
     try {
       const pagination = parsePagination(req);
@@ -68,6 +105,17 @@ export class RidersController {
       res.json({ message: "Repartidor desactivado" });
     } catch (error) {
       res.status(500).json({ error: "Error al eliminar repartidor" });
+    }
+  }
+
+  static async review(req: Request, res: Response) {
+    try {
+      await repo.reviewRider(req.params.id as string, req.body);
+      res.json({ message: "Revision de repartidor aplicada" });
+    } catch (error: any) {
+      res.status(500).json({
+        error: error?.message || "Error al revisar repartidor",
+      });
     }
   }
 }

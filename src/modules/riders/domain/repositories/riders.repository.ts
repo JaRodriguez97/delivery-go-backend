@@ -78,6 +78,26 @@ export interface IRidersRepository {
       color?: string;
     };
   }): Promise<{ id: string }>;
+  registerRider(data: {
+    firstName: string;
+    lastName: string;
+    phone: string;
+    email: string;
+    passwordHash: string;
+    workZone?: string;
+    vehicleType: "MOTORCYCLE" | "BICYCLE";
+    brand: string;
+    model: string;
+    plate?: string;
+    serialNumber?: string;
+    year: number;
+    usesBicycle: boolean;
+    files: Partial<Record<string, Express.Multer.File>>;
+  }): Promise<{ id: string }>;
+  reviewRider(
+    id: string,
+    data: { action: "APPROVE" | "REJECT"; notes?: string },
+  ): Promise<void>;
   updateRider(
     id: string,
     data: {

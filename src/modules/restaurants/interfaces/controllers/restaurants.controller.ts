@@ -1,10 +1,43 @@
 import { Request, Response } from "express";
+import { hashPassword } from "../../../../shared/security/hash.service";
 import { PrismaRestaurantsRepository } from "../../infrastructure/repositories/prisma-restaurants.repository";
 import { parsePagination } from "../../../../shared/utils/pagination";
 
 const repo = new PrismaRestaurantsRepository();
 
 export class RestaurantsController {
+  static async register(req: Request, res: Response) {
+    try {
+      const files = Array.isArray(req.files)
+        ? (req.files as Express.Multer.File[])
+        : [];
+      const businessLicense =
+        files.find((file) => file.fieldname === "businessLicenseFile") ??
+        files.find((file) =>
+          ["licenseFile", "businessLicense", "file"].includes(file.fieldname),
+        ) ??
+        files[0];
+
+      const passwordHash = await hashPassword(req.body.password as string);
+      const result = await repo.registerRestaurant({
+        ...req.body,
+        passwordHash,
+        businessLicenseUrl: businessLicense
+          ? `/uploads/restaurants/${businessLicense.filename}`
+          : undefined,
+      });
+
+      res.status(201).json({
+        message: "Registro enviado para revision manual",
+        restaurantId: result.id,
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        error: error?.message || "Error al registrar restaurante",
+      });
+    }
+  }
+
   static async list(req: Request, res: Response) {
     try {
       const pagination = parsePagination(req);
@@ -65,6 +98,28 @@ export class RestaurantsController {
       res.json({ message: "Restaurante desactivado" });
     } catch (error) {
       res.status(500).json({ error: "Error al eliminar restaurante" });
+    }
+  }
+
+  static async review(req: Request, res: Response) {
+    try {
+      await repo.reviewRestaurant(req.params.id as string, req.body);
+      res.json({ message: "Revision de restaurante aplicada" });
+    } catch (error: any) {
+      res.status(500).json({
+        error: error?.message || "Error al revisar restaurante",
+      });
+    }
+  }
+
+  static async toggleStatus(req: Request, res: Response) {
+    try {
+      await repo.toggleRestaurantStatus(req.params.id as string);
+      res.json({ message: "Estado del restaurante actualizado" });
+    } catch (error: any) {
+      res.status(500).json({
+        error: error?.message || "Error al alternar estado del restaurante",
+      });
     }
   }
 }

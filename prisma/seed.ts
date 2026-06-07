@@ -292,14 +292,21 @@ async function main() {
   const restaurantStatuses = [
     { name: "ACTIVE", description: "Restaurante activo y operando" },
     { name: "INACTIVE", description: "Restaurante temporalmente inactivo" },
-    { name: "PENDING_APPROVAL", description: "Pendiente de aprobación" },
+    { name: "PENDING", description: "Pendiente de Revisión" },
     { name: "SUSPENDED", description: "Restaurante suspendido" },
   ];
   for (const s of restaurantStatuses) {
     const exists = await prisma.restaurantStatus.findFirst({
       where: { name: s.name },
+      select: { id: true },
     });
-    if (!exists) {
+
+    if (exists?.id) {
+      await prisma.restaurantStatus.update({
+        where: { id: exists.id },
+        data: { description: s.description },
+      });
+    } else {
       await prisma.restaurantStatus.create({ data: s });
     }
   }

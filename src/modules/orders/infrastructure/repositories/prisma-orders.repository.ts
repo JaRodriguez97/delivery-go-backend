@@ -412,9 +412,88 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     };
   }
 
+  async getAvailableOrders(courierId: string): Promise<OrderListItem[]> {
+    const oneMinuteAgo = new Date(Date.now() - 60_000);
+
+    const orders = await prisma.order.findMany({
+      where: {
+        status: { name: "PENDING" },
+        assignments: {
+          none: {
+            courierId,
+            OR: [
+              { status: "ACCEPTED" },
+              { status: "OFFERED", assignedAt: { gt: oneMinuteAgo } },
+              { status: "REJECTED", rejectedAt: { gt: oneMinuteAgo } },
+            ],
+          },
+        },
+      },
+      include: {
+        customer: { include: { profile: true } },
+        restaurant: { include: { profile: true } },
+        status: true,
+        delivery: { include: { courier: { include: { profile: true } } } },
+        invoice: {
+          select: {
+            id: true,
+            invoiceNumber: true,
+            status: true,
+            totalAmount: true,
+            payments: {
+              where: { deletedAt: null },
+              select: {
+                status: true,
+                amount: true,
+                refunds: {
+                  where: { status: "PROCESSED" },
+                  select: { amount: true, status: true },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    });
+
+    const offeredAt = new Date();
+    await prisma.$transaction(
+      orders.map((order) =>
+        prisma.orderAssignment.create({
+          data: {
+            orderId: order.id,
+            courierId,
+            status: "OFFERED",
+            assignedAt: offeredAt,
+          },
+        }),
+      ),
+    );
+
+    return orders.map((o) => ({
+      id: o.id,
+      restaurantName: o.restaurant?.profile?.name ?? "N/A",
+      customerName: o.customer?.profile
+        ? `${o.customer.profile.firstName ?? ""} ${o.customer.profile.lastName ?? ""}`.trim()
+        : "N/A",
+      riderName: o.delivery?.courier?.profile
+        ? `${o.delivery.courier.profile.firstName ?? ""} ${o.delivery.courier.profile.lastName ?? ""}`.trim()
+        : null,
+      status: o.status?.name ?? "UNKNOWN",
+      totalAmount: Number(o.totalAmount ?? 0),
+      deliveryFee: Number(o.deliveryFee ?? 0),
+      financial: this.buildFinancialSummary(o.invoice),
+      createdAt: o.createdAt ?? new Date(),
+    }));
+  }
+
   async createOrder(data: {
-    restaurantId: string;
-    customerId: string;
+    restaurantId?: string;
+    customerId?: string;
+    customerName?: string;
+    customerPhone?: string;
     priorityId?: string;
     deliveryFee?: number;
     items: {
@@ -426,6 +505,48 @@ export class PrismaOrdersRepository implements IOrdersRepository {
   }): Promise<{ id: string; invoiceId: string; invoiceNumber: string }> {
     return prisma.$transaction(async (tx) => {
       const now = new Date();
+      let customerId = data.customerId;
+
+      if (!customerId) {
+        const [firstName, ...lastNames] = (data.customerName ?? "Cliente Web")
+          .trim()
+          .split(" ")
+          .filter(Boolean);
+        const lastName = lastNames.join(" ") || "Generico";
+        const syntheticEmail = `cliente-${Date.now()}@deliverygo.local`;
+
+        const user = await tx.user.create({
+          data: {
+            email: syntheticEmail,
+            passwordHash: "TEMPORAL_NO_LOGIN",
+            status: "ACTIVE",
+            emailVerified: false,
+            accountLocked: false,
+            createdAt: now,
+          },
+        });
+
+        const profile = await tx.customerProfile.create({
+          data: {
+            firstName,
+            lastName,
+            phone: data.customerPhone,
+            email: syntheticEmail,
+            createdAt: now,
+          },
+        });
+
+        const customer = await tx.customer.create({
+          data: {
+            userId: user.id,
+            profileId: profile.id,
+            createdAt: now,
+          },
+        });
+
+        customerId = customer.id;
+      }
+
       const subtotal = this.roundCurrency(
         data.items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0),
       );
@@ -436,10 +557,16 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         where: { name: "PENDING" },
       });
 
+      if (!data.restaurantId) {
+        throw new Error(
+          "No se pudo determinar el restaurante para crear el pedido",
+        );
+      }
+
       const order = await tx.order.create({
         data: {
           restaurantId: data.restaurantId,
-          customerId: data.customerId,
+          customerId,
           statusId: pendingStatus?.id,
           priorityId: data.priorityId,
           totalAmount: subtotal,
@@ -471,7 +598,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         await Promise.all([
           this.getOrCreateInvoiceSetup(tx, now),
           tx.customer.findUnique({
-            where: { id: data.customerId },
+            where: { id: customerId },
             select: { userId: true },
           }),
         ]);
@@ -583,6 +710,97 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         },
       });
     }
+  }
+
+  async acceptAssignment(orderId: string, courierId: string): Promise<void> {
+    await prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        select: { id: true, status: { select: { name: true } } },
+      });
+
+      if (!order) {
+        throw new Error("Pedido no encontrado");
+      }
+
+      if (order.status?.name !== "PENDING") {
+        throw new Error("El pedido ya no está disponible");
+      }
+
+      const confirmedStatus = await tx.orderStatus.findFirst({
+        where: { name: "CONFIRMED" },
+        select: { id: true },
+      });
+
+      const delivery = await tx.delivery.create({
+        data: {
+          orderId,
+          courierId,
+          status: "ASSIGNED",
+          startedAt: new Date(),
+        },
+      });
+
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          deliveryId: delivery.id,
+          statusId: confirmedStatus?.id,
+          updatedAt: new Date(),
+        },
+      });
+
+      if (confirmedStatus?.id) {
+        await tx.orderStatusHistory.create({
+          data: {
+            orderId,
+            statusId: confirmedStatus.id,
+            changedAt: new Date(),
+          },
+        });
+      }
+
+      await tx.orderAssignment.create({
+        data: {
+          orderId,
+          courierId,
+          assignedAt: new Date(),
+          acceptedAt: new Date(),
+          status: "ACCEPTED",
+        },
+      });
+    });
+  }
+
+  async rejectAssignment(orderId: string, courierId: string): Promise<void> {
+    await prisma.orderAssignment.create({
+      data: {
+        orderId,
+        courierId,
+        assignedAt: new Date(),
+        rejectedAt: new Date(),
+        status: "REJECTED",
+      },
+    });
+  }
+
+  async updateDeliveryStatus(orderId: string, status: string): Promise<void> {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: { deliveryId: true },
+    });
+
+    if (!order?.deliveryId) {
+      throw new Error("El pedido no tiene entrega activa");
+    }
+
+    await prisma.delivery.update({
+      where: { id: order.deliveryId },
+      data: {
+        status,
+        completedAt: status === "DELIVERED" ? new Date() : undefined,
+      },
+    });
   }
 
   async deleteOrder(id: string): Promise<void> {

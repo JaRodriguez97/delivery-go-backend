@@ -1120,18 +1120,17 @@ model Location {
 }
 
 model LocationAddress {
-    id           String                    @id @default(uuid()) @db.Uuid
-    locationId   String?                   @map("location_id") @db.Uuid
-    country      String?
-    state        String?
-    city         String?
-    neighborhood String?                   @db.VarChar(100)
-    street       String?
-    postalCode   String?                   @map("postal_code")
-    latitude     Decimal?
-    longitude    Decimal?
-    geom         Unsupported("geography")?
-    createdAt    DateTime?                 @map("created_at")
+    id         String                    @id @default(uuid()) @db.Uuid
+    locationId String?                   @map("location_id") @db.Uuid
+    country    String?
+    state      String?
+    city       String?
+    street     String?
+    postalCode String?                   @map("postal_code")
+    latitude   Decimal?
+    longitude  Decimal?
+    geom       Unsupported("geography")?
+    createdAt  DateTime?                 @map("created_at")
 
     location Location? @relation(fields: [locationId], references: [id])
 
@@ -1280,14 +1279,14 @@ model Restaurant {
     id         String    @id @default(uuid()) @db.Uuid
     ownerId    String?   @map("owner_id") @db.Uuid
     profileId  String?   @map("profile_id") @db.Uuid
-    statusId   String    @map("status_id") @db.Uuid
+    statusId   String?   @map("status_id") @db.Uuid
     locationId String?   @map("location_id") @db.Uuid
     createdAt  DateTime? @map("created_at")
     updatedAt  DateTime? @map("updated_at")
 
     owner     RestaurantOwner?     @relation(fields: [ownerId], references: [id])
     profile   RestaurantProfile?   @relation(fields: [profileId], references: [id])
-    status    RestaurantStatus     @relation(fields: [statusId], references: [id], onDelete: Restrict)
+    status    RestaurantStatus?    @relation(fields: [statusId], references: [id])
     location  Location?            @relation(fields: [locationId], references: [id])
     schedules RestaurantSchedule[]
     documents RestaurantDocument[]
@@ -1297,14 +1296,13 @@ model Restaurant {
 }
 
 model RestaurantProfile {
-    id            String    @id @default(uuid()) @db.Uuid
-    name          String?
-    description   String?   @db.Text
-    licenseNumber String?   @map("license_number") @db.VarChar(100)
-    phone         String?
-    email         String?
-    logoUrl       String?   @map("logo_url")
-    createdAt     DateTime? @map("created_at")
+    id          String    @id @default(uuid()) @db.Uuid
+    name        String?
+    description String?   @db.Text
+    phone       String?
+    email       String?
+    logoUrl     String?   @map("logo_url")
+    createdAt   DateTime? @map("created_at")
 
     restaurants Restaurant[]
 
@@ -1340,7 +1338,7 @@ model RestaurantSchedule {
 
 model RestaurantStatus {
     id          String  @id @default(uuid()) @db.Uuid
-    name        String  @unique
+    name        String?
     description String? @db.Text
 
     restaurants Restaurant[]
@@ -1537,17 +1535,16 @@ model CourierZoneAssignment {
 // ──────────────────────────────────────────────
 
 model Order {
-    id            String    @id @default(uuid()) @db.Uuid
-    restaurantId  String?   @map("restaurant_id") @db.Uuid
-    customerId    String?   @map("customer_id") @db.Uuid
-    deliveryId    String?   @unique @map("delivery_id") @db.Uuid
-    statusId      String?   @map("status_id") @db.Uuid
-    priorityId    String?   @map("priority_id") @db.Uuid
-    totalAmount   Decimal?  @map("total_amount")
-    deliveryFee   Decimal?  @map("delivery_fee")
-    lastOfferedAt DateTime? @map("last_offered_at")
-    createdAt     DateTime? @map("created_at")
-    updatedAt     DateTime? @map("updated_at")
+    id           String    @id @default(uuid()) @db.Uuid
+    restaurantId String?   @map("restaurant_id") @db.Uuid
+    customerId   String?   @map("customer_id") @db.Uuid
+    deliveryId   String?   @unique @map("delivery_id") @db.Uuid
+    statusId     String?   @map("status_id") @db.Uuid
+    priorityId   String?   @map("priority_id") @db.Uuid
+    totalAmount  Decimal?  @map("total_amount")
+    deliveryFee  Decimal?  @map("delivery_fee")
+    createdAt    DateTime? @map("created_at")
+    updatedAt    DateTime? @map("updated_at")
 
     restaurant           Restaurant?                   @relation(fields: [restaurantId], references: [id])
     customer             Customer?                     @relation(fields: [customerId], references: [id])

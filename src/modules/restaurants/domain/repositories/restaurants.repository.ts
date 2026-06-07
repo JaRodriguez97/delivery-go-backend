@@ -17,9 +17,15 @@ export interface RestaurantDetail {
   id: string;
   name: string;
   description: string | null;
+  licenseNumber: string | null;
   phone: string | null;
   email: string | null;
   logoUrl: string | null;
+  address: string | null;
+  neighborhood: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
   owner: {
     id: string;
     firstName: string;
@@ -68,6 +74,12 @@ export interface IRestaurantsRepository {
     description?: string;
     phone?: string;
     email?: string;
+    address?: string;
+    neighborhood?: string;
+    licenseNumber?: string;
+    deliveryEnabled?: boolean | string;
+    prepTimeMinutes?: number | string;
+    cuisineTypes?: string[] | string;
     owner: {
       firstName: string;
       lastName: string;
@@ -75,6 +87,27 @@ export interface IRestaurantsRepository {
       email?: string;
     };
   }): Promise<{ id: string }>;
+  registerRestaurant(data: {
+    firstName: string;
+    lastName: string;
+    phone: string;
+    email: string;
+    passwordHash: string;
+    restaurantName: string;
+    address: string;
+    neighborhood?: string;
+    licenseNumber?: string;
+    deliveryEnabled?: boolean | string;
+    prepTimeMinutes?: number | string;
+    cuisineTypes?: string[] | string;
+    description?: string;
+    businessLicenseUrl?: string;
+  }): Promise<{ id: string }>;
+  reviewRestaurant(
+    id: string,
+    data: { action: "APPROVE" | "REJECT"; notes?: string },
+  ): Promise<void>;
+  toggleRestaurantStatus(id: string): Promise<void>;
   updateRestaurant(
     id: string,
     data: {

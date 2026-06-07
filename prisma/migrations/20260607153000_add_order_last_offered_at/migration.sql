@@ -1,0 +1,2 @@
+ALTER TABLE "order"
+ADD COLUMN IF NOT EXISTS "last_offered_at" TIMESTAMP(3);

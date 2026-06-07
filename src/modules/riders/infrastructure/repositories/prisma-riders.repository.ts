@@ -1,4 +1,5 @@
 import { prisma } from "../../../../shared/config/database";
+import crypto from "crypto";
 import {
   IRidersRepository,
   RiderListItem,
@@ -13,6 +14,232 @@ import {
 } from "../../../../shared/utils/pagination";
 
 export class PrismaRidersRepository implements IRidersRepository {
+  async registerRider(data: {
+    firstName: string;
+    lastName: string;
+    phone: string;
+    email: string;
+    passwordHash: string;
+    workZone?: string;
+    vehicleType: "MOTORCYCLE" | "BICYCLE";
+    brand: string;
+    model: string;
+    plate?: string;
+    serialNumber?: string;
+    year: number;
+    usesBicycle: boolean;
+    files: Partial<Record<string, Express.Multer.File>>;
+  }): Promise<{ id: string }> {
+    const existingUser = await prisma.user.findUnique({
+      where: { email: data.email },
+      select: { id: true },
+    });
+
+    if (existingUser) {
+      throw new Error("Ya existe un usuario registrado con ese email");
+    }
+
+    return prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email: data.email,
+          passwordHash: data.passwordHash,
+          status: "PENDING",
+          emailVerified: false,
+          accountLocked: false,
+          createdAt: new Date(),
+        },
+      });
+
+      const riderRole = await tx.role.findFirst({
+        where: { name: "RIDER" },
+        select: { id: true },
+      });
+
+      if (riderRole) {
+        await tx.userRole.create({
+          data: {
+            userId: user.id,
+            roleId: riderRole.id,
+            assignedAt: new Date(),
+            status: "ACTIVE",
+          },
+        });
+      }
+
+      const courierProfile = await tx.courierProfile.create({
+        data: {
+          firstName: data.firstName,
+          lastName: data.lastName,
+          phone: data.phone,
+          email: data.email,
+          createdAt: new Date(),
+        },
+      });
+
+      const userProfile = await tx.userProfile.create({
+        data: {
+          userId: user.id,
+          firstName: data.firstName,
+          lastName: data.lastName,
+          documentType: "CC",
+          documentNumberEncrypted: Buffer.from("pending", "utf8"),
+          documentNumberHash: crypto
+            .createHash("sha256")
+            .update(`${data.email}-${Date.now()}`)
+            .digest("hex"),
+          phone: data.phone,
+          city: "Cali",
+          department: "Valle del Cauca",
+          countryCode: "+57",
+          createdAt: new Date(),
+        },
+      });
+
+      const vehicle = await tx.courierVehicle.create({
+        data: {
+          type: data.vehicleType,
+          brand: data.brand,
+          model: data.model,
+          plate: data.usesBicycle ? null : data.plate,
+          serialNumber: data.usesBicycle ? data.serialNumber : null,
+          year: data.year,
+          color: null,
+          createdAt: new Date(),
+        },
+      });
+
+      const availability = await tx.courierAvailability.create({
+        data: { isOnline: false, updatedAt: new Date() },
+      });
+
+      const courier = await tx.courier.create({
+        data: {
+          userId: user.id,
+          profileId: courierProfile.id,
+          vehicleId: vehicle.id,
+          availabilityId: availability.id,
+          status: "PENDING",
+          createdAt: new Date(),
+        },
+      });
+
+      const documentEntries: Array<{
+        documentType: string;
+        documentUrl: string;
+      }> = [];
+      const toUrl = (file?: Express.Multer.File) =>
+        file ? `/uploads/riders/${file.filename}` : undefined;
+
+      const idFileUrl = toUrl(data.files.idFile);
+      if (idFileUrl) {
+        documentEntries.push({
+          documentType: "DNI_FRONT",
+          documentUrl: idFileUrl,
+        });
+      }
+
+      const selfieFileUrl = toUrl(data.files.selfieFile);
+      if (selfieFileUrl) {
+        documentEntries.push({
+          documentType: "SELFIE",
+          documentUrl: selfieFileUrl,
+        });
+      }
+
+      const licenseFileUrl = toUrl(data.files.licenseFile);
+      if (licenseFileUrl) {
+        documentEntries.push({
+          documentType: "DRIVER_LICENSE",
+          documentUrl: licenseFileUrl,
+        });
+      }
+
+      const ownershipCardUrl = toUrl(data.files.ownershipCardFile);
+      if (ownershipCardUrl) {
+        documentEntries.push({
+          documentType: "OWNERSHIP_CARD",
+          documentUrl: ownershipCardUrl,
+        });
+      }
+
+      const soatUrl = toUrl(data.files.soatFile);
+      if (soatUrl) {
+        documentEntries.push({ documentType: "SOAT", documentUrl: soatUrl });
+      }
+
+      const technicalReviewUrl = toUrl(data.files.technicalReviewFile);
+      if (technicalReviewUrl) {
+        documentEntries.push({
+          documentType: "TECHNICAL_REVIEW",
+          documentUrl: technicalReviewUrl,
+        });
+      }
+
+      const selfieWithVehicleUrl = toUrl(data.files.selfieWithVehicleFile);
+      if (selfieWithVehicleUrl) {
+        documentEntries.push({
+          documentType: "SELFIE_WITH_VEHICLE",
+          documentUrl: selfieWithVehicleUrl,
+        });
+      }
+
+      const fullVehiclePhotoUrl = toUrl(data.files.fullVehiclePhotoFile);
+      if (fullVehiclePhotoUrl) {
+        documentEntries.push({
+          documentType: "FULL_VEHICLE_PHOTO",
+          documentUrl: fullVehiclePhotoUrl,
+        });
+      }
+
+      const plateOrSerialPhotoUrl = toUrl(data.files.plateOrSerialPhotoFile);
+      if (plateOrSerialPhotoUrl) {
+        documentEntries.push({
+          documentType: data.usesBicycle
+            ? "BICYCLE_SERIAL_PHOTO"
+            : "LICENSE_PLATE_PHOTO",
+          documentUrl: plateOrSerialPhotoUrl,
+        });
+      }
+
+      if (documentEntries.length) {
+        await tx.courierDocument.createMany({
+          data: documentEntries.map((entry) => ({
+            courierId: courier.id,
+            documentType: entry.documentType,
+            documentUrl: entry.documentUrl,
+            verified: false,
+            reviewStatus: "PENDING",
+            uploadedAt: new Date(),
+          })),
+        });
+      }
+
+      await tx.courierZoneAssignment.create({
+        data: {
+          courierId: courier.id,
+          geofenceId: null,
+          assignedAt: new Date(),
+        },
+      });
+
+      await tx.user.update({
+        where: { id: user.id },
+        data: {
+          status: "PENDING",
+          updatedAt: new Date(),
+        },
+      });
+
+      await tx.userProfile.update({
+        where: { id: userProfile.id },
+        data: { updatedAt: new Date() },
+      });
+
+      return { id: courier.id };
+    });
+  }
+
   async getKpis(): Promise<RidersKpis> {
     const couriers = await prisma.courier.findMany({
       include: { availability: true },
@@ -38,6 +265,54 @@ export class PrismaRidersRepository implements IRidersRepository {
     });
 
     return { active, inactive, online, inOrder, pendingRegistration };
+  }
+
+  async reviewRider(
+    id: string,
+    data: { action: "APPROVE" | "REJECT"; notes?: string },
+  ): Promise<void> {
+    await prisma.$transaction(async (tx) => {
+      const courier = await tx.courier.findUnique({
+        where: { id },
+        select: { id: true, userId: true },
+      });
+
+      if (!courier) {
+        throw new Error("Repartidor no encontrado");
+      }
+
+      const approved = data.action === "APPROVE";
+
+      await tx.courier.update({
+        where: { id },
+        data: {
+          status: approved ? "ACTIVE" : "INACTIVE",
+          reviewNotes: data.notes,
+          reviewedAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+
+      await tx.courierDocument.updateMany({
+        where: { courierId: id },
+        data: {
+          reviewStatus: approved ? "APPROVED" : "REJECTED",
+          verified: approved,
+          rejectionReason: approved ? null : data.notes,
+          reviewedAt: new Date(),
+        },
+      });
+
+      if (courier.userId) {
+        await tx.user.update({
+          where: { id: courier.userId },
+          data: {
+            status: approved ? "ACTIVE" : "INACTIVE",
+            updatedAt: new Date(),
+          },
+        });
+      }
+    });
   }
 
   async getRiders(

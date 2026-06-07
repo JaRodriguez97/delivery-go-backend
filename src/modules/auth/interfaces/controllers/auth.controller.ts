@@ -23,7 +23,9 @@ export class AuthController {
       res.json(result);
     } catch (error) {
       if (error instanceof AuthError) {
-        res.status(error.statusCode).json({ error: error.message });
+        res
+          .status(error.statusCode)
+          .json({ error: error.message, code: error.code });
         return;
       }
       res.status(500).json({ error: "Error interno del servidor" });
@@ -68,7 +70,9 @@ export class AuthController {
       res.json(result);
     } catch (error) {
       if (error instanceof AuthError) {
-        res.status(error.statusCode).json({ error: error.message });
+        res
+          .status(error.statusCode)
+          .json({ error: error.message, code: error.code });
         return;
       }
       res.status(500).json({ error: "Error interno del servidor" });
