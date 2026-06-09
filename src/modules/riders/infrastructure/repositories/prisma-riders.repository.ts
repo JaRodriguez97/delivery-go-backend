@@ -1,5 +1,6 @@
 import { prisma } from "../../../../shared/config/database";
 import crypto from "crypto";
+import { UserStatus } from "@prisma/client";
 import {
   IRidersRepository,
   RiderListItem,
@@ -14,9 +15,19 @@ import {
 } from "../../../../shared/utils/pagination";
 
 export class PrismaRidersRepository implements IRidersRepository {
+  private toUserStatus(value: string): UserStatus | null {
+    const normalized = value.toUpperCase();
+    if (normalized === "ACTIVE") return UserStatus.ACTIVE;
+    if (normalized === "INACTIVE") return UserStatus.INACTIVE;
+    if (normalized === "SUSPENDED") return UserStatus.SUSPENDED;
+    if (normalized === "PENDING") return UserStatus.PENDING;
+    return null;
+  }
+
   async registerRider(data: {
     firstName: string;
     lastName: string;
+    documentId: string;
     phone: string;
     email: string;
     passwordHash: string;
@@ -83,10 +94,10 @@ export class PrismaRidersRepository implements IRidersRepository {
           firstName: data.firstName,
           lastName: data.lastName,
           documentType: "CC",
-          documentNumberEncrypted: Buffer.from("pending", "utf8"),
+          documentNumberEncrypted: Buffer.from(data.documentId, "utf8"),
           documentNumberHash: crypto
             .createHash("sha256")
-            .update(`${data.email}-${Date.now()}`)
+            .update(data.documentId)
             .digest("hex"),
           phone: data.phone,
           city: "Cali",
@@ -219,6 +230,7 @@ export class PrismaRidersRepository implements IRidersRepository {
         data: {
           courierId: courier.id,
           geofenceId: null,
+          // TODO(workZone): mapear data.workZone a un geofence real cuando se implemente la asignacion de zonas.
           assignedAt: new Date(),
         },
       });
@@ -230,10 +242,16 @@ export class PrismaRidersRepository implements IRidersRepository {
           updatedAt: new Date(),
         },
       });
-
       await tx.userProfile.update({
         where: { id: userProfile.id },
-        data: { updatedAt: new Date() },
+        data: {
+          documentNumberEncrypted: Buffer.from(data.documentId, "utf8"),
+          documentNumberHash: crypto
+            .createHash("sha256")
+            .update(data.documentId)
+            .digest("hex"),
+          updatedAt: new Date(),
+        },
       });
 
       return { id: courier.id };
@@ -286,9 +304,7 @@ export class PrismaRidersRepository implements IRidersRepository {
       await tx.courier.update({
         where: { id },
         data: {
-          status: approved ? "ACTIVE" : "INACTIVE",
-          reviewNotes: data.notes,
-          reviewedAt: new Date(),
+          status: approved ? "ACTIVE" : "REJECTED",
           updatedAt: new Date(),
         },
       });
@@ -307,7 +323,7 @@ export class PrismaRidersRepository implements IRidersRepository {
         await tx.user.update({
           where: { id: courier.userId },
           data: {
-            status: approved ? "ACTIVE" : "INACTIVE",
+            status: approved ? "ACTIVE" : "SUSPENDED",
             updatedAt: new Date(),
           },
         });
@@ -404,6 +420,17 @@ export class PrismaRidersRepository implements IRidersRepository {
 
     if (!c) return null;
 
+    const userProfile = c.userId
+      ? await prisma.userProfile.findUnique({
+          where: { userId: c.userId },
+          select: { documentNumberEncrypted: true },
+        })
+      : null;
+
+    const documentNumber = userProfile?.documentNumberEncrypted
+      ? Buffer.from(userProfile.documentNumberEncrypted).toString("utf8")
+      : null;
+
     return {
       id: c.id,
       firstName: c.profile?.firstName ?? "",
@@ -413,12 +440,15 @@ export class PrismaRidersRepository implements IRidersRepository {
       photoUrl: c.profile?.photoUrl ?? null,
       status: c.status ?? "UNKNOWN",
       isOnline: c.availability?.isOnline ?? false,
+      documentNumber,
       vehicle: c.vehicle
         ? {
             type: c.vehicle.type ?? "",
             brand: c.vehicle.brand ?? "",
             model: c.vehicle.model ?? "",
             plate: c.vehicle.plate ?? "",
+            serialNumber: c.vehicle.serialNumber ?? "",
+            year: c.vehicle.year ?? null,
             color: c.vehicle.color ?? "",
           }
         : null,
@@ -502,8 +532,12 @@ export class PrismaRidersRepository implements IRidersRepository {
   ): Promise<void> {
     const courier = await prisma.courier.findUnique({
       where: { id },
-      select: { profileId: true },
+      select: { profileId: true, userId: true },
     });
+
+    if (!courier) {
+      throw new Error("Repartidor no encontrado");
+    }
 
     if (
       courier?.profileId &&
@@ -521,9 +555,33 @@ export class PrismaRidersRepository implements IRidersRepository {
     }
 
     if (data.status) {
+      const normalizedStatus = data.status.toUpperCase();
       await prisma.courier.update({
         where: { id },
-        data: { status: data.status.toUpperCase(), updatedAt: new Date() },
+        data: { status: normalizedStatus, updatedAt: new Date() },
+      });
+
+      if (courier.userId) {
+        const userStatus = this.toUserStatus(normalizedStatus);
+        await prisma.user.update({
+          where: { id: courier.userId },
+          data: {
+            ...(userStatus && { status: userStatus }),
+            updatedAt: new Date(),
+          },
+        });
+      }
+    }
+
+    if (courier.userId && (data.email || data.firstName || data.lastName)) {
+      await prisma.user.update({
+        where: { id: courier.userId },
+        data: {
+          ...(data.email && { email: data.email }),
+          ...(data.firstName && { firstName: data.firstName }),
+          ...(data.lastName && { lastName: data.lastName }),
+          updatedAt: new Date(),
+        },
       });
     }
   }

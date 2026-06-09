@@ -1,4 +1,5 @@
 import cors from "cors";
+import chalk from "chalk";
 import express from "express";
 import helmet from "helmet";
 import morgan from "morgan";
@@ -40,11 +41,44 @@ connectDB();
 export function createServer() {
   const app = express();
 
-  app.set('trust proxy', 1);
+  app.set("trust proxy", 1);
   app.use(helmet());
-  app.use(cors());
+  app.use(
+    cors({
+      origin: "*",
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization"],
+    }),
+  );
   app.use(express.json());
-  app.use(morgan("dev"));
+
+  morgan.token("date", () => {
+    return new Date().toLocaleString("es-CO", { timeZone: "America/Bogota" });
+  });
+  morgan.token("statusColored", (_req, res) => {
+    const status = res.statusCode;
+
+    if (status >= 500) return chalk.red(status.toString());
+    if (status >= 400) return chalk.yellow(status.toString());
+    if (status >= 300) return chalk.cyan(status.toString());
+    if (status >= 200) return chalk.green(status.toString());
+
+    return status.toString();
+  });
+
+  morgan.token("methodColored", (req) => {
+    const method = req.method;
+
+    if (method === "GET") return chalk.blue(method);
+    if (method === "POST") return chalk.green(method);
+    if (method === "PUT") return chalk.yellow(method);
+    if (method === "DELETE") return chalk.red(method);
+    if (method === "PATCH") return chalk.magenta(method);
+
+    return method;
+  });
+  app.use(morgan(":date - :methodColored :url :statusColored :response-time ms"));
+
   app.use(
     "/uploads",
     (_req, res, next) => {

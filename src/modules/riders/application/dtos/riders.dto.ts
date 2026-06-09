@@ -28,6 +28,7 @@ export const registerRiderSchema = z
   .object({
     firstName: z.string().min(1),
     lastName: z.string().min(1),
+    documentId: z.string().min(5),
     phone: z.string().min(8),
     email: z.string().email(),
     password: z.string().min(6),
@@ -57,6 +58,53 @@ export const registerRiderSchema = z
       });
     }
   });
+
+export const validateRegisterRiderFiles = (
+  files: Partial<Record<string, Express.Multer.File>>,
+  body: RegisterRiderDto,
+): void => {
+  if (!files.idFile) {
+    throw new Error("El archivo idFile es obligatorio");
+  }
+
+  if (!files.selfieFile) {
+    throw new Error("El archivo selfieFile es obligatorio");
+  }
+
+  if (!body.usesBicycle && !files.licenseFile) {
+    throw new Error("El archivo licenseFile es obligatorio para motocicleta");
+  }
+
+  if (!files.selfieWithVehicleFile) {
+    throw new Error("El archivo selfieWithVehicleFile es obligatorio");
+  }
+
+  if (!files.fullVehiclePhotoFile) {
+    throw new Error("El archivo fullVehiclePhotoFile es obligatorio");
+  }
+
+  if (!files.plateOrSerialPhotoFile) {
+    throw new Error("El archivo plateOrSerialPhotoFile es obligatorio");
+  }
+
+  if (!body.usesBicycle) {
+    if (!files.ownershipCardFile) {
+      throw new Error(
+        "El archivo ownershipCardFile es obligatorio para motocicleta",
+      );
+    }
+
+    if (!files.soatFile) {
+      throw new Error("El archivo soatFile es obligatorio para motocicleta");
+    }
+
+    if (!files.technicalReviewFile) {
+      throw new Error(
+        "El archivo technicalReviewFile es obligatorio para motocicleta",
+      );
+    }
+  }
+};
 
 export const reviewRiderSchema = z.object({
   action: z.enum(["APPROVE", "REJECT"]),

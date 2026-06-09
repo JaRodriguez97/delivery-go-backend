@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import { PrismaRidersRepository } from "../../infrastructure/repositories/prisma-riders.repository";
 import { parsePagination } from "../../../../shared/utils/pagination";
+import { validateRegisterRiderFiles } from "../../application/dtos/riders.dto";
 
 const repo = new PrismaRidersRepository();
 
@@ -22,6 +23,7 @@ export class RidersController {
       );
 
       const data = req.body;
+      validateRegisterRiderFiles(files, data);
       const passwordHash = await bcrypt.hash(data.password, 10);
 
       const result = await repo.registerRider({
@@ -36,6 +38,16 @@ export class RidersController {
       });
     } catch (error: any) {
       console.log("🚀 ~ RidersController ~ register ~ error:", error);
+
+      if (error?.code === "P1001" || error?.code === "P1002") {
+        res.status(503).json({
+          error:
+            "No hay conexion con la base de datos en este momento. Intenta nuevamente en unos segundos.",
+          code: error?.code,
+        });
+        return;
+      }
+
       res.status(500).json({
         error: error?.message || "Error al registrar repartidor",
       });

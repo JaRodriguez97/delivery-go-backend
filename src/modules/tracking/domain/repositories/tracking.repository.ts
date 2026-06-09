@@ -59,6 +59,19 @@ export interface ActiveDeliveryResult {
   } | null;
 }
 
+export interface ActiveRiderResult {
+  riderId: string;
+  riderName: string | null;
+  riderAvatarUrl: string | null;
+  isOnline: boolean;
+  lastSeen: Date | null;
+  riderLocation: {
+    latitude: number;
+    longitude: number;
+    timestamp: Date;
+  } | null;
+}
+
 export interface ITrackingRepository {
   getActiveDeliveries(params?: {
     search?: string;
@@ -66,6 +79,19 @@ export interface ITrackingRepository {
     limit?: number;
   }): Promise<ActiveDeliveryResult[]>;
   getOrderTracking(orderId: string): Promise<OrderTrackingResult | null>;
+  getActiveRiders(params?: {
+    search?: string;
+    filter?: ActiveDeliveryFilter;
+    limit?: number;
+  }): Promise<ActiveRiderResult[]>;
   getRiderTracking(riderId: string): Promise<RiderTrackingResult | null>;
   getDeliveryRoute(orderId: string): Promise<RoutePointResult[]>;
+  updateCourierLocationByUserId(params: {
+    userId: string;
+    latitude: number;
+    longitude: number;
+    speed?: number;
+    heading?: number;
+    recordedAt?: Date;
+  }): Promise<{ deliveryId: string }>;
 }

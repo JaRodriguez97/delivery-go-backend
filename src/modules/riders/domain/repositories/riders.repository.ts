@@ -25,11 +25,14 @@ export interface RiderDetail {
   photoUrl: string | null;
   status: string;
   isOnline: boolean;
+  documentNumber: string | null;
   vehicle: {
     type: string;
     brand: string;
     model: string;
     plate: string;
+    serialNumber: string;
+    year: number | null;
     color: string;
   } | null;
   documents: {
@@ -81,6 +84,7 @@ export interface IRidersRepository {
   registerRider(data: {
     firstName: string;
     lastName: string;
+    documentId: string;
     phone: string;
     email: string;
     passwordHash: string;

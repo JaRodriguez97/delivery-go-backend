@@ -3,6 +3,7 @@ import {
   ITrackingRepository,
   ActiveDeliveryResult,
   ActiveDeliveryFilter,
+  ActiveRiderResult,
   OrderTrackingResult,
   RiderTrackingResult,
   RoutePointResult,
@@ -68,6 +69,7 @@ export class PrismaTrackingRepository implements ITrackingRepository {
             },
             courier: {
               select: {
+                status: true,
                 profile: {
                   select: {
                     firstName: true,
@@ -139,6 +141,12 @@ export class PrismaTrackingRepository implements ITrackingRepository {
 
         const riderName =
           `${delivery.courier?.profile?.firstName ?? ""} ${delivery.courier?.profile?.lastName ?? ""}`.trim();
+        const courierStatus = (delivery.courier?.status ?? "").toUpperCase();
+
+        if (courierStatus !== "ACTIVE") {
+          return null;
+        }
+
         const pickupAddress =
           route?.origin?.addresses?.[0]?.street ??
           order.restaurant?.profile?.name ??
@@ -285,6 +293,132 @@ export class PrismaTrackingRepository implements ITrackingRepository {
     };
   }
 
+  async getActiveRiders(params?: {
+    search?: string;
+    filter?: ActiveDeliveryFilter;
+    limit?: number;
+  }): Promise<ActiveRiderResult[]> {
+    const limit = Math.min(300, Math.max(1, params?.limit ?? 100));
+    const filter = params?.filter ?? "ALL";
+    const normalizedSearch = params?.search?.trim().toLowerCase() ?? "";
+
+    const couriers = await prisma.courier.findMany({
+      where: { status: "ACTIVE" },
+      select: {
+        id: true,
+        profile: {
+          select: {
+            firstName: true,
+            lastName: true,
+            photoUrl: true,
+          },
+        },
+        availability: {
+          select: {
+            isOnline: true,
+            lastSeen: true,
+          },
+        },
+      },
+      take: limit,
+      orderBy: { createdAt: "desc" },
+    });
+
+    const riderIds = couriers.map((c) => c.id);
+
+    const latestHistory = riderIds.length
+      ? await prisma.trackingHistory.findMany({
+          where: { courierId: { in: riderIds } },
+          orderBy: { recordedAt: "desc" },
+          select: {
+            courierId: true,
+            latitude: true,
+            longitude: true,
+            recordedAt: true,
+          },
+        })
+      : [];
+
+    const latestByRider = new Map<
+      string,
+      {
+        latitude: number;
+        longitude: number;
+        timestamp: Date;
+      }
+    >();
+
+    for (const row of latestHistory) {
+      if (!row.courierId || latestByRider.has(row.courierId)) {
+        continue;
+      }
+
+      if (row.latitude && row.longitude) {
+        latestByRider.set(row.courierId, {
+          latitude: Number(row.latitude),
+          longitude: Number(row.longitude),
+          timestamp: row.recordedAt ?? new Date(),
+        });
+      }
+    }
+
+    const inDeliveryCourierIds = new Set(
+      (
+        await prisma.delivery.findMany({
+          where: {
+            courierId: { in: riderIds },
+            status: {
+              in: [
+                "ASSIGNED",
+                "HEADING_TO_RESTAURANT",
+                "AT_RESTAURANT",
+                "PICKED_UP",
+                "IN_TRANSIT",
+              ],
+            },
+          },
+          select: { courierId: true },
+        })
+      )
+        .map((d) => d.courierId)
+        .filter((id): id is string => Boolean(id)),
+    );
+
+    return couriers
+      .map((courier) => {
+        const riderName =
+          `${courier.profile?.firstName ?? ""} ${courier.profile?.lastName ?? ""}`.trim();
+        const isOnline = Boolean(courier.availability?.isOnline);
+
+        if (filter === "ONLINE" && !isOnline) {
+          return null;
+        }
+
+        if (filter === "OFFLINE" && isOnline) {
+          return null;
+        }
+
+        if (filter === "IN_DELIVERY" && !inDeliveryCourierIds.has(courier.id)) {
+          return null;
+        }
+
+        const searchable = [courier.id, riderName].join(" ").toLowerCase();
+        if (normalizedSearch && !searchable.includes(normalizedSearch)) {
+          return null;
+        }
+
+        return {
+          riderId: courier.id,
+          riderName: riderName || null,
+          riderAvatarUrl: courier.profile?.photoUrl ?? null,
+          isOnline,
+          lastSeen: courier.availability?.lastSeen ?? null,
+          riderLocation: latestByRider.get(courier.id) ?? null,
+        };
+      })
+      .filter((item): item is ActiveRiderResult => item !== null);
+  }
+
   async getRiderTracking(riderId: string): Promise<RiderTrackingResult | null> {
     const courier = await prisma.courier.findUnique({
       where: { id: riderId },
@@ -416,5 +550,92 @@ export class PrismaTrackingRepository implements ITrackingRepository {
     }
 
     return points;
+  }
+
+  async updateCourierLocationByUserId(params: {
+    userId: string;
+    latitude: number;
+    longitude: number;
+    speed?: number;
+    heading?: number;
+    recordedAt?: Date;
+  }): Promise<{ deliveryId: string }> {
+    const courier = await prisma.courier.findFirst({
+      where: { userId: params.userId },
+      select: { id: true, availabilityId: true },
+    });
+
+    if (!courier?.id) {
+      throw new Error("Repartidor no encontrado");
+    }
+
+    const activeDelivery = await prisma.delivery.findFirst({
+      where: {
+        courierId: courier.id,
+        status: {
+          in: [
+            "ASSIGNED",
+            "HEADING_TO_RESTAURANT",
+            "AT_RESTAURANT",
+            "PICKED_UP",
+            "IN_TRANSIT",
+          ],
+        },
+      },
+      orderBy: { startedAt: "desc" },
+      select: { id: true },
+    });
+
+    const recordedAt = params.recordedAt ?? new Date();
+
+    await prisma.$transaction(async (tx) => {
+      if (activeDelivery?.id) {
+        await tx.trackingLatest.upsert({
+          where: { deliveryId: activeDelivery.id },
+          create: {
+            deliveryId: activeDelivery.id,
+            courierId: courier.id,
+            latitude: params.latitude,
+            longitude: params.longitude,
+            speed: params.speed,
+            heading: params.heading,
+            recordedAt,
+          },
+          update: {
+            courierId: courier.id,
+            latitude: params.latitude,
+            longitude: params.longitude,
+            speed: params.speed,
+            heading: params.heading,
+            recordedAt,
+          },
+        });
+      }
+
+      await tx.trackingHistory.create({
+        data: {
+          deliveryId: activeDelivery?.id,
+          courierId: courier.id,
+          latitude: params.latitude,
+          longitude: params.longitude,
+          speed: params.speed,
+          heading: params.heading,
+          recordedAt,
+        },
+      });
+
+      if (courier.availabilityId) {
+        await tx.courierAvailability.update({
+          where: { id: courier.availabilityId },
+          data: {
+            isOnline: true,
+            lastSeen: recordedAt,
+            updatedAt: new Date(),
+          },
+        });
+      }
+    });
+
+    return { deliveryId: activeDelivery?.id ?? "NO_ACTIVE_DELIVERY" };
   }
 }
