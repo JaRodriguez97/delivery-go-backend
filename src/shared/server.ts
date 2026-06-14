@@ -18,6 +18,7 @@ import { paymentsRoutes } from "../modules/payments/interfaces/routes/payments.r
 import { reportsRoutes } from "../modules/reports/interfaces/routes/reports.routes";
 import { supportRoutes } from "../modules/support/interfaces/routes/support.routes";
 import { settingsRoutes } from "../modules/settings/interfaces/routes/settings.routes";
+import { geocodeRoutes } from "../modules/geocode/interfaces/routes/geocode.routes";
 
 async function connectDB(retries = 5) {
   while (retries) {
@@ -77,7 +78,9 @@ export function createServer() {
 
     return method;
   });
-  app.use(morgan(":date - :methodColored :url :statusColored :response-time ms"));
+  app.use(
+    morgan(":date - :methodColored :url :statusColored :response-time ms"),
+  );
 
   app.use(
     "/uploads",
@@ -117,6 +120,7 @@ export function createServer() {
   app.use("/api/reports", reportsRoutes);
   app.use("/api/support", supportRoutes);
   app.use("/api/settings", settingsRoutes);
+  app.use("/api/geocode", geocodeRoutes);
 
   app.use(errorHandler);
 

@@ -46,11 +46,16 @@ export interface ActiveDeliveryResult {
   orderId: string;
   status: string;
   elapsedMinutes: number | null;
+  restaurantName: string | null;
   riderId: string | null;
   riderName: string | null;
   riderAvatarUrl: string | null;
   isRiderOnline: boolean;
   pickupAddress: string | null;
+  pickupLocation: {
+    latitude: number;
+    longitude: number;
+  } | null;
   destinationAddress: string | null;
   riderLocation: {
     latitude: number;
@@ -70,6 +75,11 @@ export interface ActiveRiderResult {
     longitude: number;
     timestamp: Date;
   } | null;
+}
+
+export interface TrackingSnapshotResult {
+  deliveries: ActiveDeliveryResult[];
+  riders: ActiveRiderResult[];
 }
 
 export interface ITrackingRepository {
@@ -94,4 +104,10 @@ export interface ITrackingRepository {
     heading?: number;
     recordedAt?: Date;
   }): Promise<{ deliveryId: string }>;
+  getSnapshot(params?: {
+    search?: string;
+    filter?: ActiveDeliveryFilter;
+    deliveriesLimit?: number;
+    ridersLimit?: number;
+  }): Promise<TrackingSnapshotResult>;
 }

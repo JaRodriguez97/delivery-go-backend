@@ -25,6 +25,76 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     return Math.round(value * 100) / 100;
   }
 
+  private buildLogisticsNote(metadata: {
+    restaurantAddress?: string;
+    customerAddress?: string;
+    customerNeighborhood?: string;
+    destinationLat?: number;
+    destinationLon?: number;
+    deliveryDistanceKm?: number;
+    paymentMethod?: string;
+  }): string {
+    const payload = {
+      restaurantAddress: metadata.restaurantAddress ?? "",
+      customerAddress: metadata.customerAddress ?? "",
+      customerNeighborhood: metadata.customerNeighborhood ?? "",
+      destinationLat: metadata.destinationLat ?? null,
+      destinationLon: metadata.destinationLon ?? null,
+      deliveryDistanceKm: metadata.deliveryDistanceKm ?? null,
+      paymentMethod: metadata.paymentMethod ?? "",
+    };
+
+    return `LOGISTICS|${JSON.stringify(payload)}`;
+  }
+
+  private parseLogisticsNote(note: string | null | undefined): {
+    restaurantAddress?: string;
+    customerAddress?: string;
+    customerNeighborhood?: string;
+    destinationLat?: number;
+    destinationLon?: number;
+    deliveryDistanceKm?: number;
+    paymentMethod?: string;
+  } {
+    if (!note || !note.startsWith("LOGISTICS|")) {
+      return {};
+    }
+
+    try {
+      const raw = note.slice("LOGISTICS|".length);
+      const parsed = JSON.parse(raw) as {
+        restaurantAddress?: string;
+        customerAddress?: string;
+        customerNeighborhood?: string;
+        destinationLat?: number | null;
+        destinationLon?: number | null;
+        deliveryDistanceKm?: number | null;
+        paymentMethod?: string;
+      };
+
+      return {
+        restaurantAddress: parsed.restaurantAddress || undefined,
+        customerAddress: parsed.customerAddress || undefined,
+        customerNeighborhood: parsed.customerNeighborhood || undefined,
+        destinationLat:
+          typeof parsed.destinationLat === "number"
+            ? parsed.destinationLat
+            : undefined,
+        destinationLon:
+          typeof parsed.destinationLon === "number"
+            ? parsed.destinationLon
+            : undefined,
+        deliveryDistanceKm:
+          typeof parsed.deliveryDistanceKm === "number"
+            ? parsed.deliveryDistanceKm
+            : undefined,
+        paymentMethod: parsed.paymentMethod || undefined,
+      };
+    } catch {
+      return {};
+    }
+  }
+
   private calculateEffectivePaid(
     payments: {
       status: string;
@@ -199,13 +269,26 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     return `${sequence.prefix}-${nextNumber}`;
   }
 
-  async getKpis(): Promise<OrdersKpis> {
-    const [total, statusCounts, revenueResult] = await Promise.all([
-      prisma.order.count(),
+  async getKpis(
+    filters?: Pick<OrderFilters, "restaurantId">,
+  ): Promise<OrdersKpis> {
+    const where = filters?.restaurantId
+      ? { restaurantId: filters.restaurantId }
+      : undefined;
+
+    const [total, statusCounts, revenueOrders] = await Promise.all([
+      prisma.order.count({ where }),
       prisma.order.findMany({
+        where,
         select: { status: { select: { name: true } } },
       }),
-      prisma.order.aggregate({ _sum: { totalAmount: true } }),
+      prisma.order.findMany({
+        where,
+        select: {
+          totalAmount: true,
+          deliveryFee: true,
+        },
+      }),
     ]);
 
     const counts = statusCounts.reduce(
@@ -221,7 +304,13 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       { pending: 0, inTransit: 0, delivered: 0, cancelled: 0 },
     );
 
-    const totalRevenue = Number(revenueResult._sum.totalAmount ?? 0);
+    const totalRevenue = this.roundCurrency(
+      revenueOrders.reduce(
+        (acc, order) =>
+          acc + Number(order.totalAmount ?? 0) + Number(order.deliveryFee ?? 0),
+        0,
+      ),
+    );
     const averageTicket =
       total > 0 ? Math.round((totalRevenue / total) * 100) / 100 : 0;
 
@@ -233,6 +322,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     pagination: PaginationParams,
   ): Promise<PaginatedResponse<OrderListItem>> {
     const where: any = {};
+
+    if (filters.restaurantId) {
+      where.restaurantId = filters.restaurantId;
+    }
 
     if (filters.status) {
       where.status = { name: filters.status };
@@ -276,9 +369,25 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         orderBy: { createdAt: "desc" },
         include: {
           customer: { include: { profile: true } },
-          restaurant: { include: { profile: true } },
+          restaurant: {
+            include: {
+              profile: true,
+              location: {
+                include: {
+                  addresses: {
+                    orderBy: { createdAt: "desc" },
+                    take: 1,
+                  },
+                },
+              },
+            },
+          },
           status: true,
           delivery: { include: { courier: { include: { profile: true } } } },
+          notes: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
           invoice: {
             select: {
               id: true,
@@ -303,21 +412,39 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       prisma.order.count({ where }),
     ]);
 
-    const data: OrderListItem[] = orders.map((o) => ({
-      id: o.id,
-      restaurantName: o.restaurant?.profile?.name ?? "N/A",
-      customerName: o.customer?.profile
-        ? `${o.customer.profile.firstName ?? ""} ${o.customer.profile.lastName ?? ""}`.trim()
-        : "N/A",
-      riderName: o.delivery?.courier?.profile
-        ? `${o.delivery.courier.profile.firstName ?? ""} ${o.delivery.courier.profile.lastName ?? ""}`.trim()
-        : null,
-      status: o.status?.name ?? "UNKNOWN",
-      totalAmount: Number(o.totalAmount ?? 0),
-      deliveryFee: Number(o.deliveryFee ?? 0),
-      financial: this.buildFinancialSummary(o.invoice),
-      createdAt: o.createdAt ?? new Date(),
-    }));
+    const data: OrderListItem[] = orders.map((o) => {
+      const restaurantAddressFromLocation = o.restaurant?.location
+        ?.addresses?.[0]
+        ? [
+            o.restaurant.location.addresses[0].street,
+            o.restaurant.location.addresses[0].neighborhood,
+            o.restaurant.location.addresses[0].city,
+          ]
+            .filter(Boolean)
+            .join(", ")
+        : undefined;
+      const logistics = this.parseLogisticsNote(o.notes?.[0]?.note);
+
+      return {
+        id: o.id,
+        restaurantName: o.restaurant?.profile?.name ?? "N/A",
+        restaurantAddress:
+          logistics.restaurantAddress || restaurantAddressFromLocation,
+        customerName: o.customer?.profile
+          ? `${o.customer.profile.firstName ?? ""} ${o.customer.profile.lastName ?? ""}`.trim()
+          : "N/A",
+        customerAddress: logistics.customerAddress,
+        paymentMethod: logistics.paymentMethod,
+        riderName: o.delivery?.courier?.profile
+          ? `${o.delivery.courier.profile.firstName ?? ""} ${o.delivery.courier.profile.lastName ?? ""}`.trim()
+          : null,
+        status: o.status?.name ?? "UNKNOWN",
+        totalAmount: Number(o.totalAmount ?? 0) + Number(o.deliveryFee ?? 0),
+        deliveryFee: Number(o.deliveryFee ?? 0),
+        financial: this.buildFinancialSummary(o.invoice),
+        createdAt: o.createdAt ?? new Date(),
+      };
+    });
 
     return paginatedResponse(data, total, pagination);
   }
@@ -332,6 +459,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         status: true,
         priority: true,
         items: true,
+        notes: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
         statusHistories: {
           include: { status: true },
           orderBy: { changedAt: "desc" },
@@ -364,6 +495,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
 
     if (!o) return null;
 
+    const logistics = this.parseLogisticsNote(o.notes?.[0]?.note);
+
     return {
       id: o.id,
       restaurant: {
@@ -377,6 +510,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           : "N/A",
         email: o.customer?.profile?.email ?? "",
       },
+      customerAddress: logistics.customerAddress,
+      paymentMethod: logistics.paymentMethod,
+      deliveryDistanceKm: logistics.deliveryDistanceKm,
       rider: o.delivery?.courier?.profile
         ? {
             id: o.delivery.courier.id,
@@ -417,7 +553,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
 
     const orders = await prisma.order.findMany({
       where: {
-        status: { name: "PENDING" },
+        status: {
+          name: { in: ["PENDING", "CONFIRMED", "PREPARING", "READY"] },
+        },
+        deliveryId: null,
         assignments: {
           none: {
             courierId,
@@ -431,9 +570,25 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       },
       include: {
         customer: { include: { profile: true } },
-        restaurant: { include: { profile: true } },
+        restaurant: {
+          include: {
+            profile: true,
+            location: {
+              include: {
+                addresses: {
+                  orderBy: { createdAt: "desc" },
+                  take: 1,
+                },
+              },
+            },
+          },
+        },
         status: true,
         delivery: { include: { courier: { include: { profile: true } } } },
+        notes: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
         invoice: {
           select: {
             id: true,
@@ -472,21 +627,39 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       ),
     );
 
-    return orders.map((o) => ({
-      id: o.id,
-      restaurantName: o.restaurant?.profile?.name ?? "N/A",
-      customerName: o.customer?.profile
-        ? `${o.customer.profile.firstName ?? ""} ${o.customer.profile.lastName ?? ""}`.trim()
-        : "N/A",
-      riderName: o.delivery?.courier?.profile
-        ? `${o.delivery.courier.profile.firstName ?? ""} ${o.delivery.courier.profile.lastName ?? ""}`.trim()
-        : null,
-      status: o.status?.name ?? "UNKNOWN",
-      totalAmount: Number(o.totalAmount ?? 0),
-      deliveryFee: Number(o.deliveryFee ?? 0),
-      financial: this.buildFinancialSummary(o.invoice),
-      createdAt: o.createdAt ?? new Date(),
-    }));
+    return orders.map((o) => {
+      const restaurantAddressFromLocation = o.restaurant?.location
+        ?.addresses?.[0]
+        ? [
+            o.restaurant.location.addresses[0].street,
+            o.restaurant.location.addresses[0].neighborhood,
+            o.restaurant.location.addresses[0].city,
+          ]
+            .filter(Boolean)
+            .join(", ")
+        : undefined;
+      const logistics = this.parseLogisticsNote(o.notes?.[0]?.note);
+
+      return {
+        id: o.id,
+        restaurantName: o.restaurant?.profile?.name ?? "N/A",
+        restaurantAddress:
+          logistics.restaurantAddress || restaurantAddressFromLocation,
+        customerName: o.customer?.profile
+          ? `${o.customer.profile.firstName ?? ""} ${o.customer.profile.lastName ?? ""}`.trim()
+          : "N/A",
+        customerAddress: logistics.customerAddress,
+        paymentMethod: logistics.paymentMethod,
+        riderName: o.delivery?.courier?.profile
+          ? `${o.delivery.courier.profile.firstName ?? ""} ${o.delivery.courier.profile.lastName ?? ""}`.trim()
+          : null,
+        status: o.status?.name ?? "UNKNOWN",
+        totalAmount: Number(o.totalAmount ?? 0),
+        deliveryFee: Number(o.deliveryFee ?? 0),
+        financial: this.buildFinancialSummary(o.invoice),
+        createdAt: o.createdAt ?? new Date(),
+      };
+    });
   }
 
   async createOrder(data: {
@@ -494,9 +667,15 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     customerId?: string;
     customerName?: string;
     customerPhone?: string;
+    customerAddress?: string;
+    customerNeighborhood?: string;
+    destinationLat?: number;
+    destinationLon?: number;
+    deliveryDistanceKm?: number;
+    paymentMethod?: string;
     priorityId?: string;
     deliveryFee?: number;
-    items: {
+    items?: {
       name: string;
       quantity: number;
       unitPrice: number;
@@ -547,8 +726,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         customerId = customer.id;
       }
 
+      const items = data.items ?? [];
       const subtotal = this.roundCurrency(
-        data.items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0),
+        items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0),
       );
       const deliveryFee = this.roundCurrency(data.deliveryFee ?? 0);
       const invoiceTotal = this.roundCurrency(subtotal + deliveryFee);
@@ -563,6 +743,30 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         );
       }
 
+      const restaurant = await tx.restaurant.findUnique({
+        where: { id: data.restaurantId },
+        include: {
+          location: {
+            include: {
+              addresses: {
+                orderBy: { createdAt: "desc" },
+                take: 1,
+              },
+            },
+          },
+        },
+      });
+
+      const restaurantAddress = restaurant?.location?.addresses?.[0]
+        ? [
+            restaurant.location.addresses[0].street,
+            restaurant.location.addresses[0].neighborhood,
+            restaurant.location.addresses[0].city,
+          ]
+            .filter(Boolean)
+            .join(", ")
+        : "";
+
       const order = await tx.order.create({
         data: {
           restaurantId: data.restaurantId,
@@ -572,15 +776,18 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           totalAmount: subtotal,
           deliveryFee,
           createdAt: now,
-          items: {
-            create: data.items.map((i) => ({
-              name: i.name,
-              quantity: i.quantity,
-              unitPrice: i.unitPrice,
-              totalPrice: this.roundCurrency(i.unitPrice * i.quantity),
-              note: i.note,
-            })),
-          },
+          items:
+            items.length > 0
+              ? {
+                  create: items.map((i) => ({
+                    name: i.name,
+                    quantity: i.quantity,
+                    unitPrice: i.unitPrice,
+                    totalPrice: this.roundCurrency(i.unitPrice * i.quantity),
+                    note: i.note,
+                  })),
+                }
+              : undefined,
         },
       });
 
@@ -593,6 +800,22 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           },
         });
       }
+
+      await tx.orderNote.create({
+        data: {
+          orderId: order.id,
+          note: this.buildLogisticsNote({
+            restaurantAddress,
+            customerAddress: data.customerAddress,
+            customerNeighborhood: data.customerNeighborhood,
+            destinationLat: data.destinationLat,
+            destinationLon: data.destinationLon,
+            deliveryDistanceKm: data.deliveryDistanceKm,
+            paymentMethod: data.paymentMethod,
+          }),
+          createdAt: now,
+        },
+      });
 
       const [{ invoiceTypeId, invoiceSequenceId }, customer] =
         await Promise.all([
@@ -609,7 +832,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         now,
       );
 
-      const invoiceItems = data.items.map((item, index) => {
+      const invoiceItems = items.map((item, index) => {
         const lineSubtotal = this.roundCurrency(item.unitPrice * item.quantity);
         return {
           description: item.name,

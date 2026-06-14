@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { PrismaRidersRepository } from "../../infrastructure/repositories/prisma-riders.repository";
 import { parsePagination } from "../../../../shared/utils/pagination";
 import { validateRegisterRiderFiles } from "../../application/dtos/riders.dto";
+import { AuthenticatedRequest } from "../../../../shared/types/authenticated-request";
 
 const repo = new PrismaRidersRepository();
 
@@ -127,6 +128,24 @@ export class RidersController {
     } catch (error: any) {
       res.status(500).json({
         error: error?.message || "Error al revisar repartidor",
+      });
+    }
+  }
+
+  static async updateMyAvailability(req: AuthenticatedRequest, res: Response) {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        res.status(401).json({ error: "No autenticado" });
+        return;
+      }
+
+      const isOnline = Boolean(req.body?.isOnline);
+      const result = await repo.updateAvailabilityByUserId(userId, isOnline);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({
+        error: error?.message || "No fue posible actualizar disponibilidad",
       });
     }
   }

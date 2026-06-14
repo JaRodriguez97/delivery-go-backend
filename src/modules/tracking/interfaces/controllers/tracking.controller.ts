@@ -6,7 +6,7 @@ import { AuthenticatedRequest } from "../../../../shared/types/authenticated-req
 const repo = new PrismaTrackingRepository();
 
 export class TrackingController {
-  static async listActiveDeliveries(req: Request, res: Response) {
+  static async snapshot(req: Request, res: Response) {
     try {
       const rawFilter = (req.query.filter as string | undefined)?.toUpperCase();
       const allowedFilters: ActiveDeliveryFilter[] = [
@@ -20,18 +20,23 @@ export class TrackingController {
         ? (rawFilter as ActiveDeliveryFilter)
         : "ALL";
 
-      const rawLimit = Number(req.query.limit);
-      const limit = Number.isFinite(rawLimit) ? rawLimit : 30;
+      const rawDeliveriesLimit = Number(
+        req.query.deliveriesLimit ?? req.query.limit,
+      );
+      const rawRidersLimit = Number(req.query.ridersLimit ?? 300);
 
-      const data = await repo.getActiveDeliveries({
+      const payload = await repo.getSnapshot({
         search: req.query.search as string | undefined,
         filter,
-        limit,
+        deliveriesLimit: Number.isFinite(rawDeliveriesLimit)
+          ? rawDeliveriesLimit
+          : 50,
+        ridersLimit: Number.isFinite(rawRidersLimit) ? rawRidersLimit : 300,
       });
 
-      res.json({ data });
-    } catch (error) {
-      res.status(500).json({ error: "Error al obtener entregas activas" });
+      res.json(payload);
+    } catch {
+      res.status(500).json({ error: "Error al obtener snapshot de tracking" });
     }
   }
 
@@ -45,35 +50,6 @@ export class TrackingController {
       res.json(result);
     } catch (error) {
       res.status(500).json({ error: "Error al obtener tracking del pedido" });
-    }
-  }
-
-  static async listActiveRiders(req: Request, res: Response) {
-    try {
-      const rawFilter = (req.query.filter as string | undefined)?.toUpperCase();
-      const allowedFilters: ActiveDeliveryFilter[] = [
-        "ALL",
-        "ONLINE",
-        "OFFLINE",
-        "IN_DELIVERY",
-      ];
-
-      const filter = allowedFilters.includes(rawFilter as ActiveDeliveryFilter)
-        ? (rawFilter as ActiveDeliveryFilter)
-        : "ALL";
-
-      const rawLimit = Number(req.query.limit);
-      const limit = Number.isFinite(rawLimit) ? rawLimit : 100;
-
-      const data = await repo.getActiveRiders({
-        search: req.query.search as string | undefined,
-        filter,
-        limit,
-      });
-
-      res.json({ data });
-    } catch {
-      res.status(500).json({ error: "Error al obtener repartidores activos" });
     }
   }
 

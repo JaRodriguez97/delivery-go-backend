@@ -24,6 +24,63 @@ export class PrismaRidersRepository implements IRidersRepository {
     return null;
   }
 
+  async updateAvailabilityByUserId(
+    userId: string,
+    isOnline: boolean,
+  ): Promise<{ isOnline: boolean; lastSeen: Date }> {
+    const courier = await prisma.courier.findFirst({
+      where: { userId },
+      select: { id: true, availabilityId: true },
+    });
+
+    if (!courier) {
+      throw new Error("Repartidor no encontrado");
+    }
+
+    const now = new Date();
+
+    if (!courier.availabilityId) {
+      const availability = await prisma.courierAvailability.create({
+        data: {
+          isOnline,
+          lastSeen: now,
+          updatedAt: now,
+        },
+      });
+
+      await prisma.courier.update({
+        where: { id: courier.id },
+        data: {
+          availabilityId: availability.id,
+          updatedAt: now,
+        },
+      });
+
+      return {
+        isOnline: Boolean(availability.isOnline),
+        lastSeen: availability.lastSeen ?? now,
+      };
+    }
+
+    const availability = await prisma.courierAvailability.update({
+      where: { id: courier.availabilityId },
+      data: {
+        isOnline,
+        lastSeen: now,
+        updatedAt: now,
+      },
+      select: {
+        isOnline: true,
+        lastSeen: true,
+      },
+    });
+
+    return {
+      isOnline: Boolean(availability.isOnline),
+      lastSeen: availability.lastSeen ?? now,
+    };
+  }
+
   async registerRider(data: {
     firstName: string;
     lastName: string;

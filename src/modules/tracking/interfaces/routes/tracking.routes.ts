@@ -8,8 +8,7 @@ const router = Router();
 
 router.use(authenticationMiddleware);
 
-router.get("/active-deliveries", TrackingController.listActiveDeliveries);
-router.get("/active-riders", TrackingController.listActiveRiders);
+router.get("/snapshot", TrackingController.snapshot);
 router.patch(
   "/my-location",
   validate(updateMyLocationSchema),

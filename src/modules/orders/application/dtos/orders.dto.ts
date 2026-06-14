@@ -5,6 +5,12 @@ export const createOrderSchema = z.object({
   customerId: z.string().uuid().optional(),
   customerName: z.string().optional(),
   customerPhone: z.string().optional(),
+  customerAddress: z.string().min(5).optional(),
+  customerNeighborhood: z.string().min(2).optional(),
+  destinationLat: z.number().min(-90).max(90).optional(),
+  destinationLon: z.number().min(-180).max(180).optional(),
+  deliveryDistanceKm: z.number().min(0).optional(),
+  paymentMethod: z.string().min(3).optional(),
   priorityId: z.string().uuid().optional(),
   deliveryFee: z.number().min(0).optional(),
   items: z
@@ -16,7 +22,8 @@ export const createOrderSchema = z.object({
         note: z.string().optional(),
       }),
     )
-    .min(1),
+    .optional()
+    .default([]),
 });
 
 export const updateOrderSchema = z.object({

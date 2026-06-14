@@ -14,6 +14,7 @@ router.use(authenticationMiddleware);
 router.get("/available", OrdersController.available);
 router.get("/", OrdersController.list);
 router.post("/", validate(createOrderSchema), OrdersController.create);
+router.patch("/:id/start-preparing", OrdersController.startPreparing);
 router.patch("/:id/assignment/accept", OrdersController.acceptAssignment);
 router.patch("/:id/assignment/reject", OrdersController.rejectAssignment);
 router.patch("/:id/delivery-status", OrdersController.updateDeliveryStatus);

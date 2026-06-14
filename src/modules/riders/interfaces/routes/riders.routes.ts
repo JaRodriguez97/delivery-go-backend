@@ -47,6 +47,8 @@ router.post(
 
 router.use(authenticationMiddleware);
 
+router.patch("/me/availability", RidersController.updateMyAvailability);
+
 router.get("/", RidersController.list);
 router.get("/:id", RidersController.getById);
 router.post("/", validate(createRiderSchema), RidersController.create);

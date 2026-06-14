@@ -10,6 +10,31 @@ import {
 } from "../../domain/repositories/tracking.repository";
 
 export class PrismaTrackingRepository implements ITrackingRepository {
+  async getSnapshot(params?: {
+    search?: string;
+    filter?: ActiveDeliveryFilter;
+    deliveriesLimit?: number;
+    ridersLimit?: number;
+  }): Promise<{
+    deliveries: ActiveDeliveryResult[];
+    riders: ActiveRiderResult[];
+  }> {
+    const [deliveries, riders] = await Promise.all([
+      this.getActiveDeliveries({
+        search: params?.search,
+        filter: params?.filter,
+        limit: params?.deliveriesLimit,
+      }),
+      this.getActiveRiders({
+        search: params?.search,
+        filter: params?.filter,
+        limit: params?.ridersLimit,
+      }),
+    ]);
+
+    return { deliveries, riders };
+  }
+
   async getActiveDeliveries(params?: {
     search?: string;
     filter?: ActiveDeliveryFilter;
@@ -96,6 +121,8 @@ export class PrismaTrackingRepository implements ITrackingRepository {
                       take: 1,
                       select: {
                         street: true,
+                        latitude: true,
+                        longitude: true,
                       },
                     },
                   },
@@ -141,12 +168,6 @@ export class PrismaTrackingRepository implements ITrackingRepository {
 
         const riderName =
           `${delivery.courier?.profile?.firstName ?? ""} ${delivery.courier?.profile?.lastName ?? ""}`.trim();
-        const courierStatus = (delivery.courier?.status ?? "").toUpperCase();
-
-        if (courierStatus !== "ACTIVE") {
-          return null;
-        }
-
         const pickupAddress =
           route?.origin?.addresses?.[0]?.street ??
           order.restaurant?.profile?.name ??
@@ -183,7 +204,7 @@ export class PrismaTrackingRepository implements ITrackingRepository {
 
         const tracking = delivery.trackingLatest;
         const riderLocation =
-          tracking?.latitude && tracking?.longitude
+          tracking?.latitude != null && tracking?.longitude != null
             ? {
                 latitude: Number(tracking.latitude),
                 longitude: Number(tracking.longitude),
@@ -203,11 +224,20 @@ export class PrismaTrackingRepository implements ITrackingRepository {
           orderId: order.id,
           status,
           elapsedMinutes,
+          restaurantName: order.restaurant?.profile?.name ?? null,
           riderId: delivery.courierId ?? null,
           riderName: riderName || null,
           riderAvatarUrl: delivery.courier?.profile?.photoUrl ?? null,
           isRiderOnline,
           pickupAddress,
+          pickupLocation:
+            route?.origin?.addresses?.[0]?.latitude != null &&
+            route?.origin?.addresses?.[0]?.longitude != null
+              ? {
+                  latitude: Number(route.origin.addresses[0].latitude),
+                  longitude: Number(route.origin.addresses[0].longitude),
+                }
+              : null,
           destinationAddress,
           riderLocation,
         };
@@ -303,9 +333,9 @@ export class PrismaTrackingRepository implements ITrackingRepository {
     const normalizedSearch = params?.search?.trim().toLowerCase() ?? "";
 
     const couriers = await prisma.courier.findMany({
-      where: { status: "ACTIVE" },
       select: {
         id: true,
+        status: true,
         profile: {
           select: {
             firstName: true,
@@ -319,48 +349,34 @@ export class PrismaTrackingRepository implements ITrackingRepository {
             lastSeen: true,
           },
         },
+        deliveries: {
+          where: {
+            trackingLatest: {
+              isNot: null,
+            },
+          },
+          orderBy: {
+            trackingLatest: {
+              recordedAt: "desc",
+            },
+          },
+          take: 1,
+          select: {
+            trackingLatest: {
+              select: {
+                latitude: true,
+                longitude: true,
+                recordedAt: true,
+              },
+            },
+          },
+        },
       },
       take: limit,
       orderBy: { createdAt: "desc" },
     });
 
     const riderIds = couriers.map((c) => c.id);
-
-    const latestHistory = riderIds.length
-      ? await prisma.trackingHistory.findMany({
-          where: { courierId: { in: riderIds } },
-          orderBy: { recordedAt: "desc" },
-          select: {
-            courierId: true,
-            latitude: true,
-            longitude: true,
-            recordedAt: true,
-          },
-        })
-      : [];
-
-    const latestByRider = new Map<
-      string,
-      {
-        latitude: number;
-        longitude: number;
-        timestamp: Date;
-      }
-    >();
-
-    for (const row of latestHistory) {
-      if (!row.courierId || latestByRider.has(row.courierId)) {
-        continue;
-      }
-
-      if (row.latitude && row.longitude) {
-        latestByRider.set(row.courierId, {
-          latitude: Number(row.latitude),
-          longitude: Number(row.longitude),
-          timestamp: row.recordedAt ?? new Date(),
-        });
-      }
-    }
 
     const inDeliveryCourierIds = new Set(
       (
@@ -384,11 +400,55 @@ export class PrismaTrackingRepository implements ITrackingRepository {
         .filter((id): id is string => Boolean(id)),
     );
 
+    const latestTrackingHistory = riderIds.length
+      ? await prisma.trackingHistory.findMany({
+          where: {
+            courierId: { in: riderIds },
+            latitude: { not: null },
+            longitude: { not: null },
+          },
+          select: {
+            courierId: true,
+            latitude: true,
+            longitude: true,
+            recordedAt: true,
+          },
+          orderBy: {
+            recordedAt: "desc",
+          },
+          take: Math.max(50, riderIds.length * 10),
+        })
+      : [];
+
+    const latestTrackingByCourierId = new Map<
+      string,
+      { latitude: number; longitude: number; timestamp: Date }
+    >();
+
+    for (const sample of latestTrackingHistory) {
+      const courierId = sample.courierId;
+      if (!courierId || latestTrackingByCourierId.has(courierId)) {
+        continue;
+      }
+
+      if (sample.latitude == null || sample.longitude == null) {
+        continue;
+      }
+
+      latestTrackingByCourierId.set(courierId, {
+        latitude: Number(sample.latitude),
+        longitude: Number(sample.longitude),
+        timestamp: sample.recordedAt ?? new Date(),
+      });
+    }
+
     return couriers
       .map((courier) => {
         const riderName =
           `${courier.profile?.firstName ?? ""} ${courier.profile?.lastName ?? ""}`.trim();
         const isOnline = Boolean(courier.availability?.isOnline);
+        const latestFromDelivery = courier.deliveries?.[0]?.trackingLatest;
+        const latestFromHistory = latestTrackingByCourierId.get(courier.id);
 
         if (filter === "ONLINE" && !isOnline) {
           return null;
@@ -413,7 +473,15 @@ export class PrismaTrackingRepository implements ITrackingRepository {
           riderAvatarUrl: courier.profile?.photoUrl ?? null,
           isOnline,
           lastSeen: courier.availability?.lastSeen ?? null,
-          riderLocation: latestByRider.get(courier.id) ?? null,
+          riderLocation:
+            latestFromDelivery?.latitude != null &&
+            latestFromDelivery?.longitude != null
+              ? {
+                  latitude: Number(latestFromDelivery.latitude),
+                  longitude: Number(latestFromDelivery.longitude),
+                  timestamp: latestFromDelivery.recordedAt ?? new Date(),
+                }
+              : (latestFromHistory ?? null),
         };
       })
       .filter((item): item is ActiveRiderResult => item !== null);

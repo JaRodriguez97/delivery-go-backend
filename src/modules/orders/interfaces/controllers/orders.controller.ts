@@ -17,6 +17,80 @@ const updateOrder = new UpdateOrderUseCase(repo);
 const deleteOrder = new DeleteOrderUseCase(repo);
 
 export class OrdersController {
+  static async startPreparing(req: AuthenticatedRequest, res: Response) {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        res.status(401).json({ error: "No autenticado" });
+        return;
+      }
+
+      const order = await prisma.order.findUnique({
+        where: { id: req.params.id as string },
+        include: {
+          restaurant: {
+            select: {
+              owner: { select: { userId: true } },
+            },
+          },
+          status: { select: { name: true } },
+        },
+      });
+
+      if (!order) {
+        res.status(404).json({ error: "Pedido no encontrado" });
+        return;
+      }
+
+      if (
+        req.user?.role === "RESTAURANT" &&
+        order.restaurant?.owner?.userId !== userId
+      ) {
+        res
+          .status(403)
+          .json({ error: "No autorizado para actualizar este pedido" });
+        return;
+      }
+
+      const currentStatus = String(order.status?.name ?? "").toUpperCase();
+      if (!["PENDING", "CONFIRMED"].includes(currentStatus)) {
+        res.status(400).json({ error: "El pedido no está en estado inicial" });
+        return;
+      }
+
+      const preparingStatus = await prisma.orderStatus.findFirst({
+        where: { name: "PREPARING" },
+        select: { id: true, name: true },
+      });
+
+      if (!preparingStatus?.id) {
+        res
+          .status(500)
+          .json({ error: "No existe el estado PREPARING configurado" });
+        return;
+      }
+
+      await prisma.$transaction(async (tx) => {
+        await tx.order.update({
+          where: { id: order.id },
+          data: { statusId: preparingStatus.id, updatedAt: new Date() },
+        });
+
+        await tx.orderStatusHistory.create({
+          data: {
+            orderId: order.id,
+            statusId: preparingStatus.id,
+            changedAt: new Date(),
+          },
+        });
+      });
+
+      res.json({ message: "Pedido marcado en preparación" });
+    } catch {
+      res.status(500).json({ error: "Error al iniciar preparación" });
+    }
+  }
+
   static async available(req: AuthenticatedRequest, res: Response) {
     try {
       const userId = req.user?.userId;
@@ -27,7 +101,12 @@ export class OrdersController {
 
       const courier = await prisma.courier.findFirst({
         where: { userId },
-        select: { id: true },
+        select: {
+          id: true,
+          availability: {
+            select: { isOnline: true },
+          },
+        },
       });
 
       if (!courier) {
@@ -35,19 +114,34 @@ export class OrdersController {
         return;
       }
 
+      // Solo bloquea si el estado online existe y es explicitamente false.
+      if (courier.availability?.isOnline === false) {
+        res.json({ data: [] });
+        return;
+      }
+
       const data = await repo.getAvailableOrders(courier.id);
       res.json({ data });
     } catch (error: any) {
-      res
-        .status(500)
-        .json({
-          error: error?.message || "Error al obtener pedidos disponibles",
-        });
+      res.status(500).json({
+        error: error?.message || "Error al obtener pedidos disponibles",
+      });
     }
   }
 
-  static async list(req: Request, res: Response) {
+  static async list(req: AuthenticatedRequest, res: Response) {
     try {
+      let restaurantIdFilter: string | undefined;
+
+      if (req.user?.role === "RESTAURANT") {
+        const ownedRestaurant = await prisma.restaurant.findFirst({
+          where: { owner: { userId: req.user.userId } },
+          select: { id: true },
+        });
+
+        restaurantIdFilter = ownedRestaurant?.id;
+      }
+
       const pagination = parsePagination(req);
       const filters = {
         status: req.query.status as string | undefined,
@@ -58,6 +152,7 @@ export class OrdersController {
         dateTo: req.query.dateTo
           ? new Date(req.query.dateTo as string)
           : undefined,
+        restaurantId: restaurantIdFilter,
       };
       const result = await getOrders.execute(filters, pagination);
       res.json(result);
@@ -138,11 +233,9 @@ export class OrdersController {
       await repo.acceptAssignment(req.params.id as string, courier.id);
       res.json({ message: "Servicio aceptado" });
     } catch (error: any) {
-      res
-        .status(400)
-        .json({
-          error: error?.message || "No fue posible aceptar el servicio",
-        });
+      res.status(400).json({
+        error: error?.message || "No fue posible aceptar el servicio",
+      });
     }
   }
 
@@ -167,11 +260,9 @@ export class OrdersController {
       await repo.rejectAssignment(req.params.id as string, courier.id);
       res.json({ message: "Servicio rechazado" });
     } catch (error: any) {
-      res
-        .status(400)
-        .json({
-          error: error?.message || "No fue posible rechazar el servicio",
-        });
+      res.status(400).json({
+        error: error?.message || "No fue posible rechazar el servicio",
+      });
     }
   }
 
@@ -186,11 +277,9 @@ export class OrdersController {
       await repo.updateDeliveryStatus(req.params.id as string, status);
       res.json({ message: "Estado de entrega actualizado" });
     } catch (error: any) {
-      res
-        .status(400)
-        .json({
-          error: error?.message || "No fue posible actualizar el estado",
-        });
+      res.status(400).json({
+        error: error?.message || "No fue posible actualizar el estado",
+      });
     }
   }
 }

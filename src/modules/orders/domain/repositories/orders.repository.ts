@@ -24,7 +24,10 @@ export interface OrderFinancialSummary {
 export interface OrderListItem {
   id: string;
   restaurantName: string;
+  restaurantAddress?: string;
   customerName: string;
+  customerAddress?: string;
+  paymentMethod?: string;
   riderName: string | null;
   status: string;
   totalAmount: number;
@@ -37,6 +40,9 @@ export interface OrderDetail {
   id: string;
   restaurant: { id: string; name: string };
   customer: { id: string; name: string; email: string };
+  customerAddress?: string;
+  paymentMethod?: string;
+  deliveryDistanceKm?: number;
   rider: { id: string; name: string } | null;
   status: string;
   priority: string | null;
@@ -78,10 +84,11 @@ export interface OrderFilters {
   search?: string;
   dateFrom?: Date;
   dateTo?: Date;
+  restaurantId?: string;
 }
 
 export interface IOrdersRepository {
-  getKpis(): Promise<OrdersKpis>;
+  getKpis(filters?: Pick<OrderFilters, "restaurantId">): Promise<OrdersKpis>;
   getOrders(
     filters: OrderFilters,
     pagination: PaginationParams,
@@ -93,9 +100,15 @@ export interface IOrdersRepository {
     customerId?: string;
     customerName?: string;
     customerPhone?: string;
+    customerAddress?: string;
+    customerNeighborhood?: string;
+    destinationLat?: number;
+    destinationLon?: number;
+    deliveryDistanceKm?: number;
+    paymentMethod?: string;
     priorityId?: string;
     deliveryFee?: number;
-    items: {
+    items?: {
       name: string;
       quantity: number;
       unitPrice: number;

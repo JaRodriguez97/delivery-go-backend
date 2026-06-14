@@ -9,7 +9,7 @@ export class GetOrdersUseCase {
 
   async execute(filters: OrderFilters, pagination: PaginationParams) {
     const [kpis, orders] = await Promise.all([
-      this.repo.getKpis(),
+      this.repo.getKpis({ restaurantId: filters.restaurantId }),
       this.repo.getOrders(filters, pagination),
     ]);
     return { kpis, ...orders };
