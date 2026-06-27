@@ -15,5 +15,8 @@ export interface AuthResponse {
     firstName: string;
     lastName: string;
     roles: string[];
+    role: string;
+    restaurantId: string | null;
+    courierId: string | null;
   };
 }

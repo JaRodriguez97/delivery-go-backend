@@ -1,6 +1,7 @@
 export interface DashboardMetrics {
   totalOrders: number;
   totalRevenue: number;
+  totalDeliveryFees: number;
   activeRestaurants: number;
   activeRiders: number;
   averageDeliveryTime: number;

@@ -106,6 +106,9 @@ export class LoginUseCase {
         firstName: user.firstName,
         lastName: user.lastName,
         roles: user.roles,
+        role: user.role,
+        restaurantId: user.restaurantId,
+        courierId: user.courierId,
       },
     };
   }

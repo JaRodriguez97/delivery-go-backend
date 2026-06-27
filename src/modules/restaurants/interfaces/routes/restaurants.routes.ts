@@ -48,6 +48,7 @@ router.post(
 
 router.use(authenticationMiddleware);
 
+router.get("/my-restaurant", RestaurantsController.getMyRestaurant);
 router.get("/", RestaurantsController.list);
 router.get("/:id", RestaurantsController.getById);
 router.post(
@@ -70,6 +71,10 @@ router.patch(
   "/:id/toggle-status",
   authorizationMiddleware(ROLES.ADMIN),
   RestaurantsController.toggleStatus,
+);
+router.patch(
+  "/:id/location",
+  RestaurantsController.updateLocation,
 );
 router.delete("/:id", RestaurantsController.remove);
 

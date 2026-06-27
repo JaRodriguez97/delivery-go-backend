@@ -48,6 +48,9 @@ router.post(
 router.use(authenticationMiddleware);
 
 router.patch("/me/availability", RidersController.updateMyAvailability);
+router.get("/:id/dashboard-stats", RidersController.getDashboardStats);
+router.get("/:id/orders", RidersController.getOrderHistory);
+router.get("/:id/earnings", RidersController.getEarnings);
 
 router.get("/", RidersController.list);
 router.get("/:id", RidersController.getById);

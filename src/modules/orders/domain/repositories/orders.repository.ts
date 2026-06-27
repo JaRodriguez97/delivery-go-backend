@@ -25,8 +25,12 @@ export interface OrderListItem {
   id: string;
   restaurantName: string;
   restaurantAddress?: string;
+  restaurantLatitude?: number;
+  restaurantLongitude?: number;
   customerName: string;
   customerAddress?: string;
+  customerLatitude?: number;
+  customerLongitude?: number;
   paymentMethod?: string;
   riderName: string | null;
   status: string;
@@ -65,6 +69,10 @@ export interface OrderDetail {
     createdAt: Date;
   }[];
   financial: OrderFinancialSummary;
+  restaurantLatitude?: number;
+  restaurantLongitude?: number;
+  customerLatitude?: number;
+  customerLongitude?: number;
   createdAt: Date;
   updatedAt: Date | null;
 }

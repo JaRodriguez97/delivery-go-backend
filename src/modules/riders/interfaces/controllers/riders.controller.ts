@@ -144,8 +144,52 @@ export class RidersController {
       const result = await repo.updateAvailabilityByUserId(userId, isOnline);
       res.json(result);
     } catch (error: any) {
+      console.log(error)
       res.status(500).json({
         error: error?.message || "No fue posible actualizar disponibilidad",
+      });
+    }
+  }
+
+  static async getDashboardStats(req: Request, res: Response) {
+    try {
+      const stats = await repo.getRiderDashboardStats(req.params.id as string);
+      res.json(stats);
+    } catch (error: any) {
+      res.status(500).json({
+        error: error?.message || "Error al obtener estadísticas del repartidor",
+      });
+    }
+  }
+
+  static async getOrderHistory(req: Request, res: Response) {
+    try {
+      const id = req.params.id as string;
+      const filters = {
+        status: req.query.status as string | undefined,
+        dateFrom: req.query.dateFrom as string | undefined,
+        dateTo: req.query.dateTo as string | undefined,
+        sort: req.query.sort as string | undefined,
+        page: req.query.page ? Number(req.query.page) : undefined,
+        limit: req.query.limit ? Number(req.query.limit) : undefined,
+      };
+      const result = await repo.getOrderHistory(id, filters);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({
+        error: error?.message || "Error al obtener historial de pedidos",
+      });
+    }
+  }
+
+  static async getEarnings(req: Request, res: Response) {
+    try {
+      const id = req.params.id as string;
+      const result = await repo.getRiderEarnings(id);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({
+        error: error?.message || "Error al obtener ganancias del repartidor",
       });
     }
   }

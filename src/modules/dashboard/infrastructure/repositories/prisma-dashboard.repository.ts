@@ -10,6 +10,7 @@ export class PrismaDashboardRepository implements IDashboardRepository {
     const [
       totalOrders,
       revenueResult,
+      deliveryFeeResult,
       activeRestaurants,
       activeRiders,
       avgDelivery,
@@ -17,6 +18,7 @@ export class PrismaDashboardRepository implements IDashboardRepository {
     ] = await Promise.all([
       prisma.order.count(),
       prisma.order.aggregate({ _sum: { totalAmount: true } }),
+      prisma.order.aggregate({ _sum: { deliveryFee: true } }),
       prisma.restaurant.count({
         where: { status: { name: "ACTIVE" } },
       }),
@@ -63,6 +65,7 @@ export class PrismaDashboardRepository implements IDashboardRepository {
     return {
       totalOrders,
       totalRevenue: Number(revenueResult._sum.totalAmount ?? 0),
+      totalDeliveryFees: Number(deliveryFeeResult._sum.deliveryFee ?? 0),
       activeRestaurants,
       activeRiders,
       averageDeliveryTime,

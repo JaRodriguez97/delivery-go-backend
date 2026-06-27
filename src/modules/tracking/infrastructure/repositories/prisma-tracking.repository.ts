@@ -4,6 +4,7 @@ import {
   ActiveDeliveryResult,
   ActiveDeliveryFilter,
   ActiveRiderResult,
+  ActiveRestaurantResult,
   OrderTrackingResult,
   RiderTrackingResult,
   RoutePointResult,
@@ -18,8 +19,9 @@ export class PrismaTrackingRepository implements ITrackingRepository {
   }): Promise<{
     deliveries: ActiveDeliveryResult[];
     riders: ActiveRiderResult[];
+    restaurants: ActiveRestaurantResult[];
   }> {
-    const [deliveries, riders] = await Promise.all([
+    const [deliveries, riders, restaurants] = await Promise.all([
       this.getActiveDeliveries({
         search: params?.search,
         filter: params?.filter,
@@ -30,9 +32,13 @@ export class PrismaTrackingRepository implements ITrackingRepository {
         filter: params?.filter,
         limit: params?.ridersLimit,
       }),
+      this.getActiveRestaurants({
+        search: params?.search,
+        limit: 300,
+      }),
     ]);
 
-    return { deliveries, riders };
+    return { deliveries, riders, restaurants };
   }
 
   async getActiveDeliveries(params?: {
@@ -66,9 +72,25 @@ export class PrismaTrackingRepository implements ITrackingRepository {
       select: {
         id: true,
         createdAt: true,
+        deliveryFee: true,
         status: {
           select: {
             name: true,
+          },
+        },
+        notes: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+        customer: {
+          select: {
+            profile: {
+              select: {
+                firstName: true,
+                lastName: true,
+                phone: true,
+              },
+            },
           },
         },
         restaurant: {
@@ -219,6 +241,14 @@ export class PrismaTrackingRepository implements ITrackingRepository {
             )
           : null;
 
+        const logistics = this.parseLogisticsNote(order.notes?.[0]?.note);
+        const customerName =
+          logistics.customerName ||
+          (order.customer?.profile
+            ? `${order.customer.profile.firstName ?? ""} ${order.customer.profile.lastName ?? ""}`.trim()
+            : "N/A");
+        const customerPhone = logistics.customerPhone || order.customer?.profile?.phone || "N/A";
+
         return {
           deliveryId: delivery.id,
           orderId: order.id,
@@ -240,6 +270,9 @@ export class PrismaTrackingRepository implements ITrackingRepository {
               : null,
           destinationAddress,
           riderLocation,
+          customerName,
+          customerPhone,
+          deliveryFee: Number(order.deliveryFee ?? 0),
         };
       })
       .filter((item): item is ActiveDeliveryResult => item !== null);
@@ -341,6 +374,8 @@ export class PrismaTrackingRepository implements ITrackingRepository {
             firstName: true,
             lastName: true,
             photoUrl: true,
+            phone: true,
+            email: true,
           },
         },
         availability: {
@@ -443,7 +478,7 @@ export class PrismaTrackingRepository implements ITrackingRepository {
     }
 
     return couriers
-      .map((courier) => {
+      .map((courier): ActiveRiderResult | null => {
         const riderName =
           `${courier.profile?.firstName ?? ""} ${courier.profile?.lastName ?? ""}`.trim();
         const isOnline = Boolean(courier.availability?.isOnline);
@@ -471,6 +506,8 @@ export class PrismaTrackingRepository implements ITrackingRepository {
           riderId: courier.id,
           riderName: riderName || null,
           riderAvatarUrl: courier.profile?.photoUrl ?? null,
+          riderPhone: courier.profile?.phone ?? null,
+          riderEmail: courier.profile?.email ?? null,
           isOnline,
           lastSeen: courier.availability?.lastSeen ?? null,
           riderLocation:
@@ -531,6 +568,102 @@ export class PrismaTrackingRepository implements ITrackingRepository {
         status: d.status,
       })),
     };
+  }
+
+  async getActiveRestaurants(params?: {
+    search?: string;
+    limit?: number;
+  }): Promise<ActiveRestaurantResult[]> {
+    const limit = Math.min(300, Math.max(1, params?.limit ?? 100));
+    const normalizedSearch = params?.search?.trim().toLowerCase() ?? "";
+
+    const restaurants = await prisma.restaurant.findMany({
+      where: {
+        location: {
+          addresses: {
+            some: {
+              latitude: { not: null },
+              longitude: { not: null },
+            },
+          },
+        },
+      },
+      select: {
+        id: true,
+        updatedAt: true,
+        profile: {
+          select: {
+            name: true,
+          },
+        },
+        status: {
+          select: {
+            name: true,
+          },
+        },
+        location: {
+          select: {
+            addresses: {
+              where: {
+                latitude: { not: null },
+                longitude: { not: null },
+              },
+              orderBy: { createdAt: "desc" },
+              take: 1,
+              select: {
+                street: true,
+                neighborhood: true,
+                city: true,
+                latitude: true,
+                longitude: true,
+                createdAt: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { updatedAt: "desc" },
+      take: limit,
+    });
+
+    return restaurants
+      .map((restaurant): ActiveRestaurantResult | null => {
+        const address = restaurant.location?.addresses?.[0];
+        if (address?.latitude == null || address.longitude == null) {
+          return null;
+        }
+
+        const addressText = [address.street, address.neighborhood, address.city]
+          .filter(Boolean)
+          .join(", ");
+
+        const searchable = [
+          restaurant.id,
+          restaurant.profile?.name,
+          restaurant.status?.name,
+          addressText,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        if (normalizedSearch && !searchable.includes(normalizedSearch)) {
+          return null;
+        }
+
+        return {
+          restaurantId: restaurant.id,
+          restaurantName: restaurant.profile?.name ?? null,
+          status: restaurant.status?.name ?? "UNKNOWN",
+          address: addressText || null,
+          location: {
+            latitude: Number(address.latitude),
+            longitude: Number(address.longitude),
+            timestamp: address.createdAt ?? restaurant.updatedAt ?? null,
+          },
+        };
+      })
+      .filter((item): item is ActiveRestaurantResult => item !== null);
   }
 
   async getDeliveryRoute(orderId: string): Promise<RoutePointResult[]> {
@@ -620,6 +753,7 @@ export class PrismaTrackingRepository implements ITrackingRepository {
     return points;
   }
 
+
   async updateCourierLocationByUserId(params: {
     userId: string;
     latitude: number;
@@ -696,7 +830,6 @@ export class PrismaTrackingRepository implements ITrackingRepository {
         await tx.courierAvailability.update({
           where: { id: courier.availabilityId },
           data: {
-            isOnline: true,
             lastSeen: recordedAt,
             updatedAt: new Date(),
           },
@@ -705,5 +838,16 @@ export class PrismaTrackingRepository implements ITrackingRepository {
     });
 
     return { deliveryId: activeDelivery?.id ?? "NO_ACTIVE_DELIVERY" };
+  }
+
+  private parseLogisticsNote(note?: string | null): any {
+    if (!note || !note.startsWith("LOGISTICS|")) {
+      return {};
+    }
+    try {
+      return JSON.parse(note.substring(10));
+    } catch {
+      return {};
+    }
   }
 }

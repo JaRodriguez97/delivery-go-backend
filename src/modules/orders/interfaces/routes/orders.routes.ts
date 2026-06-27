@@ -12,6 +12,7 @@ const router = Router();
 router.use(authenticationMiddleware);
 
 router.get("/available", OrdersController.available);
+router.get("/export-csv", OrdersController.exportCSV);
 router.get("/", OrdersController.list);
 router.post("/", validate(createOrderSchema), OrdersController.create);
 router.patch("/:id/start-preparing", OrdersController.startPreparing);

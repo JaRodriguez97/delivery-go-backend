@@ -113,4 +113,32 @@ export interface IRidersRepository {
     },
   ): Promise<void>;
   deleteRider(id: string): Promise<void>;
+  getRiderDashboardStats(
+    id: string,
+  ): Promise<{ totalEarnings: number; completedWeekCount: number }>;
+  getOrderHistory(
+    id: string,
+    filters: {
+      status?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      sort?: string;
+      page?: number;
+      limit?: number;
+    },
+  ): Promise<{
+    data: any[];
+    page: number;
+    limit: number;
+    total: number;
+    totalAmount: number;
+  }>;
+  getRiderEarnings(id: string): Promise<{
+    today: { amount: number; deliveries: number; hours: number; tips: number };
+    week: { amount: number; deliveries: number; hours: number; tips: number };
+    month: { amount: number; deliveries: number; hours: number; tips: number };
+    weeklyChart: { day: string; amount: number }[];
+    pendingPayments: any[];
+    paymentHistory: any[];
+  }>;
 }

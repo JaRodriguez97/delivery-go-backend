@@ -9,6 +9,8 @@ export interface RestaurantListItem {
   ownerName: string;
   phone: string;
   address: string;
+  latitude: number | null;
+  longitude: number | null;
   status: string;
   createdAt: Date;
 }
@@ -26,6 +28,8 @@ export interface RestaurantDetail {
   city: string | null;
   state: string | null;
   country: string | null;
+  latitude: number | null;
+  longitude: number | null;
   owner: {
     id: string;
     firstName: string;
@@ -76,6 +80,8 @@ export interface IRestaurantsRepository {
     email?: string;
     address?: string;
     neighborhood?: string;
+    latitude?: number;
+    longitude?: number;
     licenseNumber?: string;
     deliveryEnabled?: boolean | string;
     prepTimeMinutes?: number | string;
@@ -86,7 +92,7 @@ export interface IRestaurantsRepository {
       phone?: string;
       email?: string;
     };
-  }): Promise<{ id: string }>;
+  } ): Promise<{ id: string }>;
   registerRestaurant(data: {
     firstName: string;
     lastName: string;
@@ -96,6 +102,8 @@ export interface IRestaurantsRepository {
     restaurantName: string;
     address: string;
     neighborhood?: string;
+    latitude?: number;
+    longitude?: number;
     licenseNumber?: string;
     deliveryEnabled?: boolean | string;
     prepTimeMinutes?: number | string;
@@ -115,8 +123,13 @@ export interface IRestaurantsRepository {
       description?: string;
       phone?: string;
       email?: string;
+      address?: string;
+      neighborhood?: string;
+      latitude?: number;
+      longitude?: number;
       statusId?: string;
     },
   ): Promise<void>;
   deleteRestaurant(id: string): Promise<void>;
+  getRestaurantByUserId(userId: string): Promise<RestaurantDetail | null>;
 }

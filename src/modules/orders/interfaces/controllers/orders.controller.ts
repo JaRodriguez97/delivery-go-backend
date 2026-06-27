@@ -8,6 +8,7 @@ import { CreateOrderUseCase } from "../../application/use-cases/create-order.use
 import { UpdateOrderUseCase } from "../../application/use-cases/update-order.use-case";
 import { DeleteOrderUseCase } from "../../application/use-cases/delete-order.use-case";
 import { parsePagination } from "../../../../shared/utils/pagination";
+import { convertToCSV } from "../../../../shared/utils/csv";
 
 const repo = new PrismaOrdersRepository();
 const getOrders = new GetOrdersUseCase(repo);
@@ -158,6 +159,76 @@ export class OrdersController {
       res.json(result);
     } catch (error) {
       res.status(500).json({ error: "Error al obtener pedidos" });
+    }
+  }
+
+  static async exportCSV(req: AuthenticatedRequest, res: Response) {
+    try {
+      let restaurantIdFilter: string | undefined;
+
+      if (req.user?.role === "RESTAURANT") {
+        const ownedRestaurant = await prisma.restaurant.findFirst({
+          where: { owner: { userId: req.user.userId } },
+          select: { id: true },
+        });
+        restaurantIdFilter = ownedRestaurant?.id;
+      }
+
+      const filters = {
+        status: req.query.status as string | undefined,
+        search: req.query.search as string | undefined,
+        dateFrom: req.query.dateFrom ? new Date(req.query.dateFrom as string) : undefined,
+        dateTo: req.query.dateTo ? new Date(req.query.dateTo as string) : undefined,
+        restaurantId: restaurantIdFilter,
+      };
+
+      const pagination = { page: 1, limit: 10000, skip: 0 };
+      const result = await getOrders.execute(filters, pagination);
+      const orders = Array.isArray(result?.data) ? result.data : [];
+
+      const fields = [
+        { label: "ID Pedido", key: "id" },
+        { label: "Fecha Creacion", key: "createdAt" },
+        { label: "Cliente", key: "customerName" },
+        { label: "Direccion Cliente", key: "customerAddress" },
+        { label: "Telefono Cliente", key: "customerPhone" },
+        { label: "Restaurante", key: "restaurantName" },
+        { label: "Subtotal Comida", key: "foodAmount" },
+        { label: "Costo Envio", key: "deliveryFee" },
+        { label: "Total Recaudado", key: "totalAmount" },
+        { label: "Metodo de Pago", key: "paymentMethod" },
+        { label: "Estado", key: "status" },
+      ];
+
+      const csvData = orders.map((o: any) => {
+        const deliveryFeeVal = Number(o.deliveryFee ?? 0);
+        const foodAmountVal = Number(o.totalAmount ?? 0);
+        const totalAmountVal = foodAmountVal + deliveryFeeVal;
+
+        return {
+          id: o.id,
+          createdAt: o.createdAt ? new Date(o.createdAt).toLocaleString("es-CO") : "",
+          customerName: o.customer?.profile
+            ? `${o.customer.profile.firstName ?? ""} ${o.customer.profile.lastName ?? ""}`.trim()
+            : o.customerName || "N/A",
+          customerAddress: o.customerAddress || "N/A",
+          customerPhone: o.customer?.profile?.phone || o.customerPhone || "N/A",
+          restaurantName: o.restaurant?.profile?.name || o.restaurantName || "N/A",
+          foodAmount: foodAmountVal,
+          deliveryFee: deliveryFeeVal,
+          totalAmount: totalAmountVal,
+          paymentMethod: o.paymentMethod || "N/A",
+          status: o.status?.name || o.status || "UNKNOWN",
+        };
+      });
+
+      const csv = convertToCSV(csvData, fields);
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename=reporte-pedidos-${Date.now()}.csv`);
+      res.status(200).send(csv);
+    } catch (error) {
+      res.status(500).json({ error: "Error al exportar reporte a CSV" });
     }
   }
 

@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { hashPassword } from "../../../../shared/security/hash.service";
 import { PrismaRestaurantsRepository } from "../../infrastructure/repositories/prisma-restaurants.repository";
 import { parsePagination } from "../../../../shared/utils/pagination";
+import { AuthenticatedRequest } from "../../../../shared/types/authenticated-request";
 
 const repo = new PrismaRestaurantsRepository();
 
@@ -18,9 +19,17 @@ export class RestaurantsController {
         ) ??
         files[0];
 
+      const payload = { ...req.body };
+      if (payload.latitude) {
+        payload.latitude = parseFloat(payload.latitude);
+      }
+      if (payload.longitude) {
+        payload.longitude = parseFloat(payload.longitude);
+      }
+
       const passwordHash = await hashPassword(req.body.password as string);
       const result = await repo.registerRestaurant({
-        ...req.body,
+        ...payload,
         passwordHash,
         businessLicenseUrl: businessLicense
           ? `/uploads/restaurants/${businessLicense.filename}`
@@ -119,6 +128,48 @@ export class RestaurantsController {
     } catch (error: any) {
       res.status(500).json({
         error: error?.message || "Error al alternar estado del restaurante",
+      });
+    }
+  }
+
+  static async updateLocation(req: Request, res: Response) {
+    try {
+      const id = req.params.id as string;
+      const latitude = parseFloat(req.body.latitude);
+      const longitude = parseFloat(req.body.longitude);
+
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        res.status(400).json({ error: "latitude y longitude deben ser números válidos" });
+        return;
+      }
+
+      await repo.updateRestaurant(id, { latitude, longitude });
+      res.json({ message: "Ubicación del restaurante actualizada" });
+    } catch (error: any) {
+      res.status(500).json({
+        error: error?.message || "Error al actualizar ubicación del restaurante",
+      });
+    }
+  }
+
+  static async getMyRestaurant(req: AuthenticatedRequest, res: Response) {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        res.status(401).json({ error: "No autenticado" });
+        return;
+      }
+
+      const restaurant = await repo.getRestaurantByUserId(userId);
+      if (!restaurant) {
+        res.status(404).json({ error: "Restaurante no encontrado para el usuario actual" });
+        return;
+      }
+
+      res.json(restaurant);
+    } catch (error: any) {
+      res.status(500).json({
+        error: error?.message || "Error al obtener restaurante del usuario actual",
       });
     }
   }

@@ -164,6 +164,8 @@ export class PrismaRestaurantsRepository implements IRestaurantsRepository {
     restaurantName: string;
     address: string;
     neighborhood?: string;
+    latitude?: number;
+    longitude?: number;
     licenseNumber?: string;
     deliveryEnabled?: boolean | string;
     prepTimeMinutes?: number | string;
@@ -246,6 +248,8 @@ export class PrismaRestaurantsRepository implements IRestaurantsRepository {
               city: "Cali",
               state: "Valle del Cauca",
               country: "CO",
+              latitude: data.latitude,
+              longitude: data.longitude,
               createdAt: new Date(),
             },
           },
@@ -426,6 +430,14 @@ export class PrismaRestaurantsRepository implements IRestaurantsRepository {
         : "N/A",
       phone: r.profile?.phone ?? r.owner?.phone ?? "",
       address: r.location?.addresses?.[0]?.street ?? "",
+      latitude:
+        r.location?.addresses?.[0]?.latitude != null
+          ? Number(r.location.addresses[0].latitude)
+          : null,
+      longitude:
+        r.location?.addresses?.[0]?.longitude != null
+          ? Number(r.location.addresses[0].longitude)
+          : null,
       status: r.status?.name ?? "UNKNOWN",
       createdAt: r.createdAt ?? new Date(),
     }));
@@ -462,6 +474,14 @@ export class PrismaRestaurantsRepository implements IRestaurantsRepository {
       city: r.location?.addresses?.[0]?.city ?? null,
       state: r.location?.addresses?.[0]?.state ?? null,
       country: r.location?.addresses?.[0]?.country ?? null,
+      latitude:
+        r.location?.addresses?.[0]?.latitude != null
+          ? Number(r.location.addresses[0].latitude)
+          : null,
+      longitude:
+        r.location?.addresses?.[0]?.longitude != null
+          ? Number(r.location.addresses[0].longitude)
+          : null,
       owner: r.owner
         ? {
             id: r.owner.id,
@@ -495,6 +515,8 @@ export class PrismaRestaurantsRepository implements IRestaurantsRepository {
     email?: string;
     address?: string;
     neighborhood?: string;
+    latitude?: number;
+    longitude?: number;
     licenseNumber?: string;
     deliveryEnabled?: boolean | string;
     prepTimeMinutes?: number | string;
@@ -545,6 +567,8 @@ export class PrismaRestaurantsRepository implements IRestaurantsRepository {
                   city: "Cali",
                   state: "Valle del Cauca",
                   country: "CO",
+                  latitude: data.latitude,
+                  longitude: data.longitude,
                   createdAt: new Date(),
                 },
               },
@@ -573,12 +597,16 @@ export class PrismaRestaurantsRepository implements IRestaurantsRepository {
       description?: string;
       phone?: string;
       email?: string;
+      address?: string;
+      neighborhood?: string;
+      latitude?: number;
+      longitude?: number;
       statusId?: string;
     },
   ): Promise<void> {
     const restaurant = await prisma.restaurant.findUnique({
       where: { id },
-      select: { profileId: true },
+      select: { profileId: true, locationId: true },
     });
 
     if (
@@ -602,6 +630,66 @@ export class PrismaRestaurantsRepository implements IRestaurantsRepository {
         data: { statusId: data.statusId, updatedAt: new Date() },
       });
     }
+
+    const shouldUpdateLocation =
+      data.address !== undefined ||
+      data.neighborhood !== undefined ||
+      data.latitude !== undefined ||
+      data.longitude !== undefined;
+
+    if (shouldUpdateLocation) {
+      const locationId =
+        restaurant?.locationId ??
+        (
+          await prisma.location.create({
+            data: {
+              name: data.name ? `Locacion ${data.name}` : "Locacion restaurante",
+              createdAt: new Date(),
+            },
+            select: { id: true },
+          })
+        ).id;
+
+      if (!restaurant?.locationId) {
+        await prisma.restaurant.update({
+          where: { id },
+          data: { locationId, updatedAt: new Date() },
+        });
+      }
+
+      const existingAddress = await prisma.locationAddress.findFirst({
+        where: { locationId },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+
+      const addressData = {
+        ...(data.address !== undefined && { street: data.address }),
+        ...(data.neighborhood !== undefined && {
+          neighborhood: data.neighborhood,
+        }),
+        ...(data.latitude !== undefined && { latitude: data.latitude }),
+        ...(data.longitude !== undefined && { longitude: data.longitude }),
+        city: "Cali",
+        state: "Valle del Cauca",
+        country: "CO",
+      };
+
+      if (existingAddress?.id) {
+        await prisma.locationAddress.update({
+          where: { id: existingAddress.id },
+          data: addressData,
+        });
+      } else {
+        await prisma.locationAddress.create({
+          data: {
+            locationId,
+            ...addressData,
+            createdAt: new Date(),
+          },
+        });
+      }
+    }
   }
 
   async deleteRestaurant(id: string): Promise<void> {
@@ -614,5 +702,67 @@ export class PrismaRestaurantsRepository implements IRestaurantsRepository {
       where: { id },
       data: { statusId: inactiveStatusId, updatedAt: new Date() },
     });
+  }
+
+  async getRestaurantByUserId(userId: string): Promise<RestaurantDetail | null> {
+    const r = await prisma.restaurant.findFirst({
+      where: { owner: { userId } },
+      include: {
+        profile: true,
+        owner: true,
+        status: true,
+        location: { include: { addresses: true } },
+        schedules: true,
+        documents: true,
+      },
+    });
+
+    if (!r) return null;
+
+    return {
+      id: r.id,
+      name: r.profile?.name ?? "N/A",
+      description: r.profile?.description ?? null,
+      licenseNumber: r.profile?.licenseNumber ?? null,
+      phone: r.profile?.phone ?? null,
+      email: r.profile?.email ?? null,
+      logoUrl: r.profile?.logoUrl ?? null,
+      address: r.location?.addresses?.[0]?.street ?? null,
+      neighborhood: r.location?.addresses?.[0]?.neighborhood ?? null,
+      city: r.location?.addresses?.[0]?.city ?? null,
+      state: r.location?.addresses?.[0]?.state ?? null,
+      country: r.location?.addresses?.[0]?.country ?? null,
+      latitude:
+        r.location?.addresses?.[0]?.latitude != null
+          ? Number(r.location.addresses[0].latitude)
+          : null,
+      longitude:
+        r.location?.addresses?.[0]?.longitude != null
+          ? Number(r.location.addresses[0].longitude)
+          : null,
+      owner: r.owner
+        ? {
+            id: r.owner.id,
+            firstName: r.owner.firstName ?? "",
+            lastName: r.owner.lastName ?? "",
+            phone: r.owner.phone ?? null,
+            email: r.owner.email ?? null,
+          }
+        : null,
+      status: r.status?.name ?? "UNKNOWN",
+      schedules: r.schedules.map((s) => ({
+        dayOfWeek: s.dayOfWeek ?? 0,
+        openTime: s.openTime?.toISOString().substring(11, 16) ?? null,
+        closeTime: s.closeTime?.toISOString().substring(11, 16) ?? null,
+        isClosed: s.isClosed ?? false,
+      })),
+      documents: r.documents.map((d) => ({
+        id: d.id,
+        documentType: d.documentType ?? "",
+        documentUrl: d.documentUrl ?? "",
+        verified: d.verified ?? false,
+      })),
+      createdAt: r.createdAt ?? new Date(),
+    };
   }
 }

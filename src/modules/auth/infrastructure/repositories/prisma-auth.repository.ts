@@ -19,6 +19,18 @@ export class PrismaAuthRepository implements IAuthRepository {
 
     if (!user) return null;
 
+    const roles = user.userRoles.map((ur) => ur.role.name);
+    const [restaurant, courier] = await Promise.all([
+      prisma.restaurant.findFirst({
+        where: { owner: { userId: user.id } },
+        select: { id: true },
+      }),
+      prisma.courier.findFirst({
+        where: { userId: user.id },
+        select: { id: true },
+      }),
+    ]);
+
     return {
       id: user.id,
       email: user.email,
@@ -29,7 +41,10 @@ export class PrismaAuthRepository implements IAuthRepository {
       lockedUntil: user.lockedUntil,
       firstName: user.profile?.firstName ?? "",
       lastName: user.profile?.lastName ?? "",
-      roles: user.userRoles.map((ur) => ur.role.name),
+      roles,
+      role: roles[0] ?? "CUSTOMER",
+      restaurantId: restaurant?.id ?? null,
+      courierId: courier?.id ?? null,
     };
   }
 
@@ -47,6 +62,18 @@ export class PrismaAuthRepository implements IAuthRepository {
 
     if (!user) return null;
 
+    const roles = user.userRoles.map((ur) => ur.role.name);
+    const [restaurant, courier] = await Promise.all([
+      prisma.restaurant.findFirst({
+        where: { owner: { userId: user.id } },
+        select: { id: true },
+      }),
+      prisma.courier.findFirst({
+        where: { userId: user.id },
+        select: { id: true },
+      }),
+    ]);
+
     return {
       id: user.id,
       email: user.email,
@@ -57,7 +84,10 @@ export class PrismaAuthRepository implements IAuthRepository {
       lockedUntil: user.lockedUntil,
       firstName: user.profile?.firstName ?? "",
       lastName: user.profile?.lastName ?? "",
-      roles: user.userRoles.map((ur) => ur.role.name),
+      roles,
+      role: roles[0] ?? "CUSTOMER",
+      restaurantId: restaurant?.id ?? null,
+      courierId: courier?.id ?? null,
     };
   }
 

@@ -425,15 +425,26 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         : undefined;
       const logistics = this.parseLogisticsNote(o.notes?.[0]?.note);
 
+      const restaurantLatitude = o.restaurant?.location?.addresses?.[0]?.latitude
+        ? Number(o.restaurant.location.addresses[0].latitude)
+        : undefined;
+      const restaurantLongitude = o.restaurant?.location?.addresses?.[0]?.longitude
+        ? Number(o.restaurant.location.addresses[0].longitude)
+        : undefined;
+
       return {
         id: o.id,
         restaurantName: o.restaurant?.profile?.name ?? "N/A",
         restaurantAddress:
           logistics.restaurantAddress || restaurantAddressFromLocation,
+        restaurantLatitude,
+        restaurantLongitude,
         customerName: o.customer?.profile
           ? `${o.customer.profile.firstName ?? ""} ${o.customer.profile.lastName ?? ""}`.trim()
           : "N/A",
         customerAddress: logistics.customerAddress,
+        customerLatitude: logistics.destinationLat,
+        customerLongitude: logistics.destinationLon,
         paymentMethod: logistics.paymentMethod,
         riderName: o.delivery?.courier?.profile
           ? `${o.delivery.courier.profile.firstName ?? ""} ${o.delivery.courier.profile.lastName ?? ""}`.trim()
@@ -454,7 +465,19 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       where: { id },
       include: {
         customer: { include: { profile: true } },
-        restaurant: { include: { profile: true } },
+        restaurant: {
+          include: {
+            profile: true,
+            location: {
+              include: {
+                addresses: {
+                  orderBy: { createdAt: "desc" },
+                  take: 1,
+                },
+              },
+            },
+          },
+        },
         delivery: { include: { courier: { include: { profile: true } } } },
         status: true,
         priority: true,
@@ -496,6 +519,13 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     if (!o) return null;
 
     const logistics = this.parseLogisticsNote(o.notes?.[0]?.note);
+
+    const restaurantLatitude = o.restaurant?.location?.addresses?.[0]?.latitude
+      ? Number(o.restaurant.location.addresses[0].latitude)
+      : undefined;
+    const restaurantLongitude = o.restaurant?.location?.addresses?.[0]?.longitude
+      ? Number(o.restaurant.location.addresses[0].longitude)
+      : undefined;
 
     return {
       id: o.id,
@@ -543,6 +573,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         createdAt: inc.createdAt ?? new Date(),
       })),
       financial: this.buildFinancialSummary(o.invoice),
+      restaurantLatitude,
+      restaurantLongitude,
+      customerLatitude: logistics.destinationLat,
+      customerLongitude: logistics.destinationLon,
       createdAt: o.createdAt ?? new Date(),
       updatedAt: o.updatedAt ?? null,
     };
@@ -640,15 +674,26 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         : undefined;
       const logistics = this.parseLogisticsNote(o.notes?.[0]?.note);
 
+      const restaurantLatitude = o.restaurant?.location?.addresses?.[0]?.latitude
+        ? Number(o.restaurant.location.addresses[0].latitude)
+        : undefined;
+      const restaurantLongitude = o.restaurant?.location?.addresses?.[0]?.longitude
+        ? Number(o.restaurant.location.addresses[0].longitude)
+        : undefined;
+
       return {
         id: o.id,
         restaurantName: o.restaurant?.profile?.name ?? "N/A",
         restaurantAddress:
           logistics.restaurantAddress || restaurantAddressFromLocation,
+        restaurantLatitude,
+        restaurantLongitude,
         customerName: o.customer?.profile
           ? `${o.customer.profile.firstName ?? ""} ${o.customer.profile.lastName ?? ""}`.trim()
           : "N/A",
         customerAddress: logistics.customerAddress,
+        customerLatitude: logistics.destinationLat,
+        customerLongitude: logistics.destinationLon,
         paymentMethod: logistics.paymentMethod,
         riderName: o.delivery?.courier?.profile
           ? `${o.delivery.courier.profile.firstName ?? ""} ${o.delivery.courier.profile.lastName ?? ""}`.trim()
@@ -826,11 +871,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           }),
         ]);
 
-      const invoiceNumber = await this.nextInvoiceNumber(
-        tx,
-        invoiceSequenceId,
-        now,
-      );
+      const invoiceNumber = `DRAFT-${order.id.substring(0, 8)}-${Date.now()}`;
 
       const invoiceItems = items.map((item, index) => {
         const lineSubtotal = this.roundCurrency(item.unitPrice * item.quantity);
@@ -873,9 +914,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           discountAmount: 0,
           taxAmount: 0,
           totalAmount: invoiceTotal,
-          status: "ISSUED",
-          issuedAt: now,
-          notes: `Factura automatica generada para pedido ${order.id}`,
+          status: "DRAFT",
+          issuedAt: null,
+          notes: `Borrador de factura generado para pedido ${order.id}`,
           createdAt: now,
           items: {
             create: invoiceItems,
@@ -1008,41 +1049,116 @@ export class PrismaOrdersRepository implements IOrdersRepository {
   }
 
   async updateDeliveryStatus(orderId: string, status: string): Promise<void> {
-    const order = await prisma.order.findUnique({
-      where: { id: orderId },
-      select: { deliveryId: true },
-    });
+    await prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        select: { deliveryId: true, status: { select: { name: true } } },
+      });
 
-    if (!order?.deliveryId) {
-      throw new Error("El pedido no tiene entrega activa");
-    }
+      if (!order?.deliveryId) {
+        throw new Error("El pedido no tiene entrega activa");
+      }
 
-    await prisma.delivery.update({
-      where: { id: order.deliveryId },
-      data: {
-        status,
-        completedAt: status === "DELIVERED" ? new Date() : undefined,
-      },
+      await tx.delivery.update({
+        where: { id: order.deliveryId },
+        data: {
+          status,
+          completedAt: status === "DELIVERED" ? new Date() : undefined,
+        },
+      });
+
+      const orderStatus = await tx.orderStatus.findFirst({
+        where: { name: status },
+      });
+
+      if (orderStatus && order.status?.name !== status) {
+        await tx.order.update({
+          where: { id: orderId },
+          data: { statusId: orderStatus.id, updatedAt: new Date() },
+        });
+
+        await tx.orderStatusHistory.create({
+          data: {
+            orderId: orderId,
+            statusId: orderStatus.id,
+            changedAt: new Date(),
+          },
+        });
+      }
+
+      if (status === "DELIVERED") {
+        const invoice = await tx.invoice.findUnique({
+          where: { orderId: orderId },
+          select: { id: true, invoiceSequenceId: true, status: true },
+        });
+
+        if (invoice && invoice.status === "DRAFT") {
+          const invoiceNumber = await this.nextInvoiceNumber(
+            tx,
+            invoice.invoiceSequenceId,
+            new Date(),
+          );
+
+          await tx.invoice.update({
+            where: { id: invoice.id },
+            data: {
+              invoiceNumber,
+              status: "ISSUED",
+              issuedAt: new Date(),
+            },
+          });
+        }
+      } else if (
+        status === "CANCELLED" ||
+        status === "REJECTED" ||
+        status === "FAILED"
+      ) {
+        const invoice = await tx.invoice.findUnique({
+          where: { orderId: orderId },
+          select: { id: true, status: true },
+        });
+
+        if (invoice && invoice.status === "DRAFT") {
+          await tx.invoice.update({
+            where: { id: invoice.id },
+            data: { status: "CANCELLED" },
+          });
+        }
+      }
     });
   }
 
   async deleteOrder(id: string): Promise<void> {
-    const cancelledStatus = await prisma.orderStatus.findFirst({
-      where: { name: "CANCELLED" },
-    });
+    await prisma.$transaction(async (tx) => {
+      const cancelledStatus = await tx.orderStatus.findFirst({
+        where: { name: "CANCELLED" },
+      });
 
-    if (cancelledStatus) {
-      await prisma.order.update({
-        where: { id },
-        data: { statusId: cancelledStatus.id, updatedAt: new Date() },
+      if (cancelledStatus) {
+        await tx.order.update({
+          where: { id },
+          data: { statusId: cancelledStatus.id, updatedAt: new Date() },
+        });
+        await tx.orderStatusHistory.create({
+          data: {
+            orderId: id,
+            statusId: cancelledStatus.id,
+            changedAt: new Date(),
+          },
+        });
+      }
+
+      const invoice = await tx.invoice.findUnique({
+        where: { orderId: id },
+        select: { id: true, status: true },
       });
-      await prisma.orderStatusHistory.create({
-        data: {
-          orderId: id,
-          statusId: cancelledStatus.id,
-          changedAt: new Date(),
-        },
-      });
-    }
+
+      if (invoice && invoice.status === "DRAFT") {
+        await tx.invoice.update({
+          where: { id: invoice.id },
+          data: { status: "CANCELLED" },
+        });
+      }
+    });
   }
 }

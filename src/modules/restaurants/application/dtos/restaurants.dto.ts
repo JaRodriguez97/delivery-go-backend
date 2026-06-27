@@ -7,10 +7,20 @@ export const createRestaurantSchema = z.object({
   email: z.string().email().optional(),
   address: z.string().optional(),
   neighborhood: z.string().optional(),
+  latitude: z.coerce.number().min(-90).max(90).optional(),
+  longitude: z.coerce.number().min(-180).max(180).optional(),
   licenseNumber: z.string().optional(),
-  deliveryEnabled: z.union([z.boolean(), z.string()]).optional(),
-  prepTimeMinutes: z.union([z.number(), z.string()]).optional(),
-  cuisineTypes: z.union([z.array(z.string()), z.string()]).optional(),
+  deliveryEnabled: z.coerce.boolean().optional().default(true),
+  prepTimeMinutes: z.coerce.number().int().optional().default(30),
+  cuisineTypes: z
+    .union([z.array(z.string()), z.string()])
+    .transform((val) => {
+      if (typeof val === "string") {
+        return val.split(",").map((s) => s.trim()).filter(Boolean);
+      }
+      return val;
+    })
+    .optional(),
   owner: z.object({
     firstName: z.string().min(1),
     lastName: z.string().min(1),
@@ -24,6 +34,10 @@ export const updateRestaurantSchema = z.object({
   description: z.string().optional(),
   phone: z.string().optional(),
   email: z.string().email().optional(),
+  address: z.string().optional(),
+  neighborhood: z.string().optional(),
+  latitude: z.coerce.number().min(-90).max(90).optional(),
+  longitude: z.coerce.number().min(-180).max(180).optional(),
   statusId: z.string().uuid().optional(),
 });
 
@@ -36,10 +50,20 @@ export const registerRestaurantSchema = z.object({
   restaurantName: z.string().min(1),
   address: z.string().min(3),
   neighborhood: z.string().optional(),
+  latitude: z.coerce.number().min(-90).max(90).optional(),
+  longitude: z.coerce.number().min(-180).max(180).optional(),
   licenseNumber: z.string().optional(),
-  deliveryEnabled: z.union([z.boolean(), z.string()]).optional(),
-  prepTimeMinutes: z.union([z.number(), z.string()]).optional(),
-  cuisineTypes: z.union([z.array(z.string()), z.string()]).optional(),
+  deliveryEnabled: z.coerce.boolean().optional().default(true),
+  prepTimeMinutes: z.coerce.number().int().optional().default(30),
+  cuisineTypes: z
+    .union([z.array(z.string()), z.string()])
+    .transform((val) => {
+      if (typeof val === "string") {
+        return val.split(",").map((s) => s.trim()).filter(Boolean);
+      }
+      return val;
+    })
+    .optional(),
   description: z.string().optional(),
 });
 

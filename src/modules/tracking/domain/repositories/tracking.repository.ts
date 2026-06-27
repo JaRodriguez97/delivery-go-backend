@@ -62,12 +62,17 @@ export interface ActiveDeliveryResult {
     longitude: number;
     timestamp: Date;
   } | null;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  deliveryFee?: number;
 }
 
 export interface ActiveRiderResult {
   riderId: string;
   riderName: string | null;
   riderAvatarUrl: string | null;
+  riderPhone?: string | null;
+  riderEmail?: string | null;
   isOnline: boolean;
   lastSeen: Date | null;
   riderLocation: {
@@ -77,9 +82,22 @@ export interface ActiveRiderResult {
   } | null;
 }
 
+export interface ActiveRestaurantResult {
+  restaurantId: string;
+  restaurantName: string | null;
+  status: string;
+  address: string | null;
+  location: {
+    latitude: number;
+    longitude: number;
+    timestamp: Date | null;
+  };
+}
+
 export interface TrackingSnapshotResult {
   deliveries: ActiveDeliveryResult[];
   riders: ActiveRiderResult[];
+  restaurants: ActiveRestaurantResult[];
 }
 
 export interface ITrackingRepository {
@@ -94,6 +112,10 @@ export interface ITrackingRepository {
     filter?: ActiveDeliveryFilter;
     limit?: number;
   }): Promise<ActiveRiderResult[]>;
+  getActiveRestaurants(params?: {
+    search?: string;
+    limit?: number;
+  }): Promise<ActiveRestaurantResult[]>;
   getRiderTracking(riderId: string): Promise<RiderTrackingResult | null>;
   getDeliveryRoute(orderId: string): Promise<RoutePointResult[]>;
   updateCourierLocationByUserId(params: {
