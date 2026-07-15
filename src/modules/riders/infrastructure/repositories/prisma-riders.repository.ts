@@ -761,6 +761,10 @@ export class PrismaRidersRepository implements IRidersRepository {
                   },
                 },
               },
+              notes: {
+                orderBy: { createdAt: "desc" },
+                take: 1,
+              },
             },
           },
         },
@@ -769,13 +773,16 @@ export class PrismaRidersRepository implements IRidersRepository {
     ]);
 
     const mappedOrders = deliveries.map((d) => {
-      const streetAddress = d.order?.restaurant?.location?.addresses?.[0]?.street;
+      const logistics = d.order?.notes?.[0]?.note
+        ? this.parseLogisticsNote(d.order.notes[0].note)
+        : {};
       return {
         id: d.id,
+        orderId: d.orderId,
         code: d.order?.id?.substring(0, 8).toUpperCase() || d.id.substring(0, 8).toUpperCase(),
         status: d.status || "UNKNOWN",
         restaurantName: d.order?.restaurant?.profile?.name || "Restaurante",
-        customerAddress: streetAddress || "Dirección de entrega",
+        customerAddress: logistics.customerAddress || "Dirección de entrega",
         amount: Number(d.order?.deliveryFee || 0),
         createdAt: d.completedAt || d.startedAt || new Date(),
       };
@@ -932,5 +939,48 @@ export class PrismaRidersRepository implements IRidersRepository {
       pendingPayments,
       paymentHistory,
     };
+  }
+
+  private parseLogisticsNote(note: string | null | undefined): {
+    restaurantAddress?: string;
+    customerAddress?: string;
+    customerNeighborhood?: string;
+    destinationLat?: number;
+    destinationLon?: number;
+    deliveryDistanceKm?: number;
+    paymentMethod?: string;
+  } {
+    if (!note || !note.startsWith("LOGISTICS|")) {
+      return {};
+    }
+
+    try {
+      const raw = note.slice("LOGISTICS|".length);
+      const parsed = JSON.parse(raw) as {
+        restaurantAddress?: string;
+        customerAddress?: string;
+        customerNeighborhood?: string;
+        destinationLat?: number | null;
+        destinationLon?: number | null;
+        deliveryDistanceKm?: number | null;
+        paymentMethod?: string;
+      };
+
+      return {
+        restaurantAddress: parsed.restaurantAddress || undefined,
+        customerAddress: parsed.customerAddress || undefined,
+        customerNeighborhood: parsed.customerNeighborhood || undefined,
+        destinationLat:
+          typeof parsed.destinationLat === "number"
+            ? parsed.destinationLat
+            : undefined,
+        destinationLon:
+          typeof parsed.destinationLon === "number"
+            ? parsed.destinationLon
+            : undefined,
+      };
+    } catch {
+      return {};
+    }
   }
 }

@@ -2,6 +2,8 @@ import { LoginDto, AuthResponse } from "../dtos/auth.dto";
 import { IAuthRepository } from "../../domain/repositories/auth.repository";
 import { comparePassword } from "../../../../shared/security/hash.service";
 import { generateToken } from "../../../../shared/security/token.service";
+import { prisma } from "../../../../shared/config/database";
+import { EmailService } from "../../../../shared/services/email.service";
 
 export class LoginUseCase {
   constructor(private authRepo: IAuthRepository) {}
@@ -77,6 +79,44 @@ export class LoginUseCase {
       throw new AuthError("Credenciales inválidas", 401);
     }
 
+    // ──────────────────────────────────────────────
+    // OTP CHECK FOR WEB PORTAL (ADMIN)
+    // ──────────────────────────────────────────────
+    const isWebUser = user.roles.includes("ADMIN");
+
+    if (isWebUser) {
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+      // Save OTP in database
+      await prisma.loginOtp.create({
+        data: {
+          userId: user.id,
+          code,
+          expiresAt,
+        },
+      });
+
+      // Send Email containing OTP
+      const etherealUrl = await EmailService.sendOtp(user.email, code);
+
+      // Create Verification Log
+      await this.authRepo.createAuditLog({
+        userId: user.id,
+        action: "VERIFICATION",
+        success: true,
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      });
+
+      return {
+        requiresOtp: true,
+        email: user.email,
+        etherealUrl: etherealUrl || undefined,
+      };
+    }
+
+    // Direct Login for ADMIN / CUSTOMER
     const token = generateToken({
       userId: user.id,
       role: user.roles[0] ?? "CUSTOMER",

@@ -20,6 +20,7 @@ import { supportRoutes } from "../modules/support/interfaces/routes/support.rout
 import { settingsRoutes } from "../modules/settings/interfaces/routes/settings.routes";
 import { geocodeRoutes } from "../modules/geocode/interfaces/routes/geocode.routes";
 import { usersRoutes } from "../modules/users/interfaces/routes/users.routes";
+import { pushRoutes } from "../modules/push/interfaces/routes/push.routes";
 
 async function connectDB(retries = 5) {
   while (retries) {
@@ -123,6 +124,7 @@ export function createServer() {
   app.use("/api/settings", settingsRoutes);
   app.use("/api/geocode", geocodeRoutes);
   app.use("/api/users", usersRoutes);
+  app.use("/api/push", pushRoutes);
 
   app.use(errorHandler);
 

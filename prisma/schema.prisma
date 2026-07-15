@@ -271,6 +271,7 @@ model User {
     pushDevices            PushDevice[]
     notificationRecipients NotificationRecipient[]
     supportTickets         SupportTicket[]
+    otps                   LoginOtp[]
 
     @@map("user")
 }
@@ -404,6 +405,19 @@ model VerificationToken {
     user User @relation(fields: [userId], references: [id])
 
     @@map("verification_token")
+}
+
+model LoginOtp {
+    id         String    @id @default(uuid()) @db.Uuid
+    userId     String    @map("user_id") @db.Uuid
+    code       String    @db.VarChar(6)
+    expiresAt  DateTime  @map("expires_at")
+    verifiedAt DateTime? @map("verified_at")
+    createdAt  DateTime  @default(now()) @map("created_at")
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@map("login_otp")
 }
 
 model UserDevice {

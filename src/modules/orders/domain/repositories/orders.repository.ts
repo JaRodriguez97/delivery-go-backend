@@ -37,6 +37,8 @@ export interface OrderListItem {
   totalAmount: number;
   deliveryFee: number;
   financial: OrderFinancialSummary;
+  verificationCode?: string | null;
+  deliveryStatus?: string | null;
   createdAt: Date;
 }
 
@@ -73,6 +75,8 @@ export interface OrderDetail {
   restaurantLongitude?: number;
   customerLatitude?: number;
   customerLongitude?: number;
+  verificationCode?: string | null;
+  deliveryStatus?: string | null;
   createdAt: Date;
   updatedAt: Date | null;
 }
@@ -85,6 +89,8 @@ export interface OrdersKpis {
   cancelled: number;
   totalRevenue: number;
   averageTicket: number;
+  cashRevenue?: number;
+  cardRevenue?: number;
 }
 
 export interface OrderFilters {

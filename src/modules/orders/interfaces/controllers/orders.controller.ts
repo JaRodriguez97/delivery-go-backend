@@ -92,6 +92,80 @@ export class OrdersController {
     }
   }
 
+  static async markReady(req: AuthenticatedRequest, res: Response) {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        res.status(401).json({ error: "No autenticado" });
+        return;
+      }
+
+      const order = await prisma.order.findUnique({
+        where: { id: req.params.id as string },
+        include: {
+          restaurant: {
+            select: {
+              owner: { select: { userId: true } },
+            },
+          },
+          status: { select: { name: true } },
+        },
+      });
+
+      if (!order) {
+        res.status(404).json({ error: "Pedido no encontrado" });
+        return;
+      }
+
+      if (
+        req.user?.role === "RESTAURANT" &&
+        order.restaurant?.owner?.userId !== userId
+      ) {
+        res
+          .status(403)
+          .json({ error: "No autorizado para actualizar este pedido" });
+        return;
+      }
+
+      const currentStatus = String(order.status?.name ?? "").toUpperCase();
+      if (currentStatus !== "PREPARING") {
+        res.status(400).json({ error: "El pedido no está en preparación" });
+        return;
+      }
+
+      const readyStatus = await prisma.orderStatus.findFirst({
+        where: { name: "READY" },
+        select: { id: true, name: true },
+      });
+
+      if (!readyStatus?.id) {
+        res
+          .status(500)
+          .json({ error: "No existe el estado READY configurado" });
+        return;
+      }
+
+      await prisma.$transaction(async (tx) => {
+        await tx.order.update({
+          where: { id: order.id },
+          data: { statusId: readyStatus.id, updatedAt: new Date() },
+        });
+
+        await tx.orderStatusHistory.create({
+          data: {
+            orderId: order.id,
+            statusId: readyStatus.id,
+            changedAt: new Date(),
+          },
+        });
+      });
+
+      res.json({ message: "Pedido marcado como listo para recoger" });
+    } catch {
+      res.status(500).json({ error: "Error al marcar pedido como listo" });
+    }
+  }
+
   static async available(req: AuthenticatedRequest, res: Response) {
     try {
       const userId = req.user?.userId;

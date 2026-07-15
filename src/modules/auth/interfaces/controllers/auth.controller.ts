@@ -7,16 +7,56 @@ import {
 } from "../../application/use-cases/login.use-case";
 import { LogoutUseCase } from "../../application/use-cases/logout.use-case";
 import { GetMeUseCase } from "../../application/use-cases/get-me.use-case";
+import { VerifyOtpUseCase } from "../../application/use-cases/verify-otp.use-case";
+import { SendOtpUseCase } from "../../application/use-cases/send-otp.use-case";
 
 const authRepo = new PrismaAuthRepository();
 const loginUseCase = new LoginUseCase(authRepo);
 const logoutUseCase = new LogoutUseCase(authRepo);
 const getMeUseCase = new GetMeUseCase(authRepo);
+const verifyOtpUseCase = new VerifyOtpUseCase(authRepo);
+const sendOtpUseCase = new SendOtpUseCase(authRepo);
 
 export class AuthController {
   static async login(req: Request, res: Response) {
     try {
       const result = await loginUseCase.execute(req.body, {
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof AuthError) {
+        res
+          .status(error.statusCode)
+          .json({ error: error.message, code: error.code });
+        return;
+      }
+      res.status(500).json({ error: "Error interno del servidor" });
+    }
+  }
+
+  static async verifyOtp(req: Request, res: Response) {
+    try {
+      const result = await verifyOtpUseCase.execute(req.body, {
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof AuthError) {
+        res
+          .status(error.statusCode)
+          .json({ error: error.message, code: error.code });
+        return;
+      }
+      res.status(500).json({ error: "Error interno del servidor" });
+    }
+  }
+
+  static async sendOtp(req: Request, res: Response) {
+    try {
+      const result = await sendOtpUseCase.execute(req.body, {
         ipAddress: req.ip,
         userAgent: req.headers["user-agent"],
       });

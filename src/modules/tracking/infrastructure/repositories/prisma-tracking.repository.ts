@@ -212,11 +212,13 @@ export class PrismaTrackingRepository implements ITrackingRepository {
           return null;
         }
 
-        if (filter === "ONLINE" && !isRiderOnline) {
+        const isInDelivery = inDeliveryStatuses.has(status);
+
+        if (filter === "ONLINE" && !isRiderOnline && !isInDelivery) {
           return null;
         }
 
-        if (filter === "OFFLINE" && isRiderOnline) {
+        if (filter === "OFFLINE" && (isRiderOnline || isInDelivery)) {
           return null;
         }
 
@@ -485,11 +487,13 @@ export class PrismaTrackingRepository implements ITrackingRepository {
         const latestFromDelivery = courier.deliveries?.[0]?.trackingLatest;
         const latestFromHistory = latestTrackingByCourierId.get(courier.id);
 
-        if (filter === "ONLINE" && !isOnline) {
+        const isInDelivery = inDeliveryCourierIds.has(courier.id);
+
+        if (filter === "ONLINE" && !isOnline && !isInDelivery) {
           return null;
         }
 
-        if (filter === "OFFLINE" && isOnline) {
+        if (filter === "OFFLINE" && (isOnline || isInDelivery)) {
           return null;
         }
 

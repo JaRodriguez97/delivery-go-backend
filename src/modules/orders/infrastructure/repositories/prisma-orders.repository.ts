@@ -1,4 +1,5 @@
 import { prisma } from "../../../../shared/config/database";
+import { PushNotificationService } from "../../../../shared/services/push-notification.service";
 import { Prisma } from "@prisma/client";
 import {
   IOrdersRepository,
@@ -287,6 +288,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         select: {
           totalAmount: true,
           deliveryFee: true,
+          notes: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
         },
       }),
     ]);
@@ -311,10 +316,37 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         0,
       ),
     );
+
+    let cashRevenue = 0;
+    let cardRevenue = 0;
+
+    for (const order of revenueOrders) {
+      const orderAmount =
+        Number(order.totalAmount ?? 0) + Number(order.deliveryFee ?? 0);
+      const logistics = this.parseLogisticsNote(order.notes?.[0]?.note);
+      const method = (logistics.paymentMethod ?? "").toUpperCase();
+
+      if (method === "CASH" || method === "EFECTIVO") {
+        cashRevenue += orderAmount;
+      } else {
+        cardRevenue += orderAmount;
+      }
+    }
+
+    cashRevenue = this.roundCurrency(cashRevenue);
+    cardRevenue = this.roundCurrency(cardRevenue);
+
     const averageTicket =
       total > 0 ? Math.round((totalRevenue / total) * 100) / 100 : 0;
 
-    return { total, ...counts, totalRevenue, averageTicket };
+    return {
+      total,
+      ...counts,
+      totalRevenue,
+      averageTicket,
+      cashRevenue,
+      cardRevenue,
+    };
   }
 
   async getOrders(
@@ -336,25 +368,32 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       if (filters.dateTo) where.createdAt.lte = filters.dateTo;
     }
     if (filters.search) {
+      const searchTrimmed = filters.search.trim();
+      const isUuid =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          searchTrimmed,
+        );
+
       where.OR = [
+        ...(isUuid ? [{ id: searchTrimmed }] : []),
         {
           customer: {
             profile: {
-              firstName: { contains: filters.search, mode: "insensitive" },
+              firstName: { contains: searchTrimmed, mode: "insensitive" },
             },
           },
         },
         {
           customer: {
             profile: {
-              lastName: { contains: filters.search, mode: "insensitive" },
+              lastName: { contains: searchTrimmed, mode: "insensitive" },
             },
           },
         },
         {
           restaurant: {
             profile: {
-              name: { contains: filters.search, mode: "insensitive" },
+              name: { contains: searchTrimmed, mode: "insensitive" },
             },
           },
         },
@@ -384,6 +423,11 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           },
           status: true,
           delivery: { include: { courier: { include: { profile: true } } } },
+          otps: {
+            select: { otpCode: true },
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
           notes: {
             orderBy: { createdAt: "desc" },
             take: 1,
@@ -425,10 +469,12 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         : undefined;
       const logistics = this.parseLogisticsNote(o.notes?.[0]?.note);
 
-      const restaurantLatitude = o.restaurant?.location?.addresses?.[0]?.latitude
+      const restaurantLatitude = o.restaurant?.location?.addresses?.[0]
+        ?.latitude
         ? Number(o.restaurant.location.addresses[0].latitude)
         : undefined;
-      const restaurantLongitude = o.restaurant?.location?.addresses?.[0]?.longitude
+      const restaurantLongitude = o.restaurant?.location?.addresses?.[0]
+        ?.longitude
         ? Number(o.restaurant.location.addresses[0].longitude)
         : undefined;
 
@@ -453,6 +499,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         totalAmount: Number(o.totalAmount ?? 0) + Number(o.deliveryFee ?? 0),
         deliveryFee: Number(o.deliveryFee ?? 0),
         financial: this.buildFinancialSummary(o.invoice),
+        verificationCode: o.otps?.[0]?.otpCode ?? null,
+        deliveryStatus: o.delivery?.status ?? null,
         createdAt: o.createdAt ?? new Date(),
       };
     });
@@ -490,6 +538,11 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           include: { status: true },
           orderBy: { changedAt: "desc" },
         },
+        otps: {
+          select: { otpCode: true },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
         incidents: {
           include: { incidentType: true },
           orderBy: { createdAt: "desc" },
@@ -523,7 +576,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     const restaurantLatitude = o.restaurant?.location?.addresses?.[0]?.latitude
       ? Number(o.restaurant.location.addresses[0].latitude)
       : undefined;
-    const restaurantLongitude = o.restaurant?.location?.addresses?.[0]?.longitude
+    const restaurantLongitude = o.restaurant?.location?.addresses?.[0]
+      ?.longitude
       ? Number(o.restaurant.location.addresses[0].longitude)
       : undefined;
 
@@ -577,6 +631,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       restaurantLongitude,
       customerLatitude: logistics.destinationLat,
       customerLongitude: logistics.destinationLon,
+      verificationCode: o.otps?.[0]?.otpCode ?? null,
+      deliveryStatus: o.delivery?.status ?? null,
       createdAt: o.createdAt ?? new Date(),
       updatedAt: o.updatedAt ?? null,
     };
@@ -619,6 +675,11 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         },
         status: true,
         delivery: { include: { courier: { include: { profile: true } } } },
+        otps: {
+          select: { otpCode: true },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
         notes: {
           orderBy: { createdAt: "desc" },
           take: 1,
@@ -674,10 +735,12 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         : undefined;
       const logistics = this.parseLogisticsNote(o.notes?.[0]?.note);
 
-      const restaurantLatitude = o.restaurant?.location?.addresses?.[0]?.latitude
+      const restaurantLatitude = o.restaurant?.location?.addresses?.[0]
+        ?.latitude
         ? Number(o.restaurant.location.addresses[0].latitude)
         : undefined;
-      const restaurantLongitude = o.restaurant?.location?.addresses?.[0]?.longitude
+      const restaurantLongitude = o.restaurant?.location?.addresses?.[0]
+        ?.longitude
         ? Number(o.restaurant.location.addresses[0].longitude)
         : undefined;
 
@@ -701,7 +764,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         status: o.status?.name ?? "UNKNOWN",
         totalAmount: Number(o.totalAmount ?? 0),
         deliveryFee: Number(o.deliveryFee ?? 0),
+        deliveryDistanceKm: Number(logistics.deliveryDistanceKm ?? 0),
         financial: this.buildFinancialSummary(o.invoice),
+        verificationCode: o.otps?.[0]?.otpCode ?? null,
+        deliveryStatus: o.delivery?.status ?? null,
         createdAt: o.createdAt ?? new Date(),
       };
     });
@@ -846,6 +912,16 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         });
       }
 
+      const otpCode = Math.floor(1000 + Math.random() * 9000).toString();
+      await tx.orderOtp.create({
+        data: {
+          orderId: order.id,
+          otpCode,
+          expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+          createdAt: now,
+        },
+      });
+
       await tx.orderNote.create({
         data: {
           orderId: order.id,
@@ -973,23 +1049,56 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           status: "ASSIGNED",
         },
       });
+
+      // Notificación push al repartidor asignado
+      try {
+        const courier = await prisma.courier.findUnique({
+          where: { id: data.courierId },
+          select: { userId: true },
+        });
+        if (courier?.userId) {
+          await PushNotificationService.sendToUser(
+            courier.userId,
+            "Nuevo pedido asignado",
+            `Se te ha asignado el pedido #${id.substring(0, 8).toUpperCase()}. ¡Acepta el servicio!`,
+          );
+        }
+      } catch (err) {
+        console.error("❌ Error al enviar notificación de asignación:", err);
+      }
     }
   }
 
   async acceptAssignment(orderId: string, courierId: string): Promise<void> {
+    let customerId: string | null = null;
+    let restaurantOwnerUserId: string | null = null;
+
     await prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({
         where: { id: orderId },
-        select: { id: true, status: { select: { name: true } } },
+        select: {
+          id: true,
+          customerId: true,
+          restaurant: {
+            select: {
+              owner: { select: { userId: true } },
+            },
+          },
+          status: { select: { name: true } },
+        },
       });
 
       if (!order) {
         throw new Error("Pedido no encontrado");
       }
 
-      if (order.status?.name !== "PENDING") {
+      const allowedStatuses = ["PENDING", "CONFIRMED", "PREPARING", "READY"];
+      if (!allowedStatuses.includes(order.status?.name ?? "")) {
         throw new Error("El pedido ya no está disponible");
       }
+
+      customerId = order.customerId;
+      restaurantOwnerUserId = order.restaurant?.owner?.userId ?? null;
 
       const confirmedStatus = await tx.orderStatus.findFirst({
         where: { name: "CONFIRMED" },
@@ -1005,16 +1114,18 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         },
       });
 
+      const shouldUpdateStatus = order.status?.name === "PENDING";
+
       await tx.order.update({
         where: { id: orderId },
         data: {
           deliveryId: delivery.id,
-          statusId: confirmedStatus?.id,
+          ...(shouldUpdateStatus && confirmedStatus?.id && { statusId: confirmedStatus.id }),
           updatedAt: new Date(),
         },
       });
 
-      if (confirmedStatus?.id) {
+      if (shouldUpdateStatus && confirmedStatus?.id) {
         await tx.orderStatusHistory.create({
           data: {
             orderId,
@@ -1034,6 +1145,29 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         },
       });
     });
+
+    // Enviar notificaciones push fuera de la transacción
+    try {
+      if (restaurantOwnerUserId) {
+        await PushNotificationService.sendToUser(
+          restaurantOwnerUserId,
+          "Repartidor asignado",
+          `El repartidor ha aceptado el pedido #${orderId.substring(0, 8).toUpperCase()} y se dirige al restaurante.`,
+        );
+      }
+      if (customerId) {
+        await PushNotificationService.sendToUser(
+          customerId,
+          "Repartidor en camino",
+          `Un repartidor aceptó tu pedido #${orderId.substring(0, 8).toUpperCase()} y está en camino.`,
+        );
+      }
+    } catch (err) {
+      console.error(
+        "❌ Error al enviar notificaciones en acceptAssignment:",
+        err,
+      );
+    }
   }
 
   async rejectAssignment(orderId: string, courierId: string): Promise<void> {
@@ -1049,15 +1183,30 @@ export class PrismaOrdersRepository implements IOrdersRepository {
   }
 
   async updateDeliveryStatus(orderId: string, status: string): Promise<void> {
+    let customerId: string | null = null;
+    let restaurantOwnerUserId: string | null = null;
+
     await prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({
         where: { id: orderId },
-        select: { deliveryId: true, status: { select: { name: true } } },
+        select: {
+          deliveryId: true,
+          customerId: true,
+          restaurant: {
+            select: {
+              owner: { select: { userId: true } },
+            },
+          },
+          status: { select: { name: true } },
+        },
       });
 
       if (!order?.deliveryId) {
         throw new Error("El pedido no tiene entrega activa");
       }
+
+      customerId = order.customerId;
+      restaurantOwnerUserId = order.restaurant?.owner?.userId ?? null;
 
       await tx.delivery.update({
         where: { id: order.deliveryId },
@@ -1126,6 +1275,36 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         }
       }
     });
+
+    // Enviar notificaciones push fuera de la transacción
+    try {
+      if (restaurantOwnerUserId) {
+        await PushNotificationService.sendToUser(
+          restaurantOwnerUserId,
+          "Estado de entrega actualizado",
+          `El pedido #${orderId.substring(0, 8).toUpperCase()} actualizó su entrega a: ${status}.`,
+        );
+      }
+      if (customerId) {
+        let msg = `Tu pedido ahora está en estado: ${status}.`;
+        if (status === "PICKED_UP") {
+          msg =
+            "Tu repartidor recogió tu pedido en el restaurante y va en camino.";
+        } else if (status === "DELIVERED") {
+          msg = "¡Tu pedido ha sido entregado! Que lo disfrutes.";
+        }
+        await PushNotificationService.sendToUser(
+          customerId,
+          "Actualización de tu pedido",
+          msg,
+        );
+      }
+    } catch (err) {
+      console.error(
+        "❌ Error al enviar notificaciones en updateDeliveryStatus:",
+        err,
+      );
+    }
   }
 
   async deleteOrder(id: string): Promise<void> {
