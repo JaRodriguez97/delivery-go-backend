@@ -5,5 +5,6 @@ import { authenticationMiddleware } from "../../../../shared/middlewares/authent
 const router = Router();
 
 router.post("/register", authenticationMiddleware, PushController.registerDevice);
+router.get("/notifications", authenticationMiddleware, PushController.getNotifications);
 
 export const pushRoutes = router;

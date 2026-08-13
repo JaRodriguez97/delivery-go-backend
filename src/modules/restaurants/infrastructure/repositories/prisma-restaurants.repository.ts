@@ -1,10 +1,12 @@
 import { prisma } from "../../../../shared/config/database";
+import { PushNotificationService } from "../../../../shared/services/push-notification.service";
 import {
   IRestaurantsRepository,
   RestaurantListItem,
   RestaurantDetail,
   RestaurantsKpis,
   RestaurantFilters,
+  PublicRestaurantItem,
 } from "../../domain/repositories/restaurants.repository";
 import {
   PaginationParams,
@@ -286,16 +288,16 @@ export class PrismaRestaurantsRepository implements IRestaurantsRepository {
     id: string,
     data: { action: "APPROVE" | "REJECT"; notes?: string },
   ): Promise<void> {
+    const restaurant = await prisma.restaurant.findUnique({
+      where: { id },
+      include: { owner: true },
+    });
+
+    if (!restaurant) {
+      throw new Error("Restaurante no encontrado");
+    }
+
     await prisma.$transaction(async (tx) => {
-      const restaurant = await tx.restaurant.findUnique({
-        where: { id },
-        include: { owner: true },
-      });
-
-      if (!restaurant) {
-        throw new Error("Restaurante no encontrado");
-      }
-
       const statusName =
         data.action === "APPROVE"
           ? RESTAURANT_STATUS.ACTIVE
@@ -320,6 +322,20 @@ export class PrismaRestaurantsRepository implements IRestaurantsRepository {
         });
       }
     });
+
+    if (restaurant.owner?.userId) {
+      try {
+        await PushNotificationService.sendToUser(
+          restaurant.owner.userId,
+          data.action === "APPROVE" ? "🎉 Cuenta aprobada" : "❌ Registro rechazado",
+          data.action === "APPROVE"
+            ? "Tu restaurante ha sido aprobado. Ya puedes iniciar sesión y recibir pedidos."
+            : `Tu registro no fue aprobado. Motivo: ${data.notes || "Documentos no legibles o inválidos."}`
+        );
+      } catch (err) {
+        console.error("❌ Error al enviar notificación en reviewRestaurant:", err);
+      }
+    }
   }
 
   async toggleRestaurantStatus(id: string): Promise<void> {
@@ -469,7 +485,15 @@ export class PrismaRestaurantsRepository implements IRestaurantsRepository {
       phone: r.profile?.phone ?? null,
       email: r.profile?.email ?? null,
       logoUrl: r.profile?.logoUrl ?? null,
-      address: r.location?.addresses?.[0]?.street ?? null,
+      address: r.location?.addresses?.[0]
+        ? [
+            r.location.addresses[0].street,
+            r.location.addresses[0].neighborhood,
+            r.location.addresses[0].city,
+          ]
+            .filter(Boolean)
+            .join(", ")
+        : null,
       neighborhood: r.location?.addresses?.[0]?.neighborhood ?? null,
       city: r.location?.addresses?.[0]?.city ?? null,
       state: r.location?.addresses?.[0]?.state ?? null,
@@ -727,7 +751,15 @@ export class PrismaRestaurantsRepository implements IRestaurantsRepository {
       phone: r.profile?.phone ?? null,
       email: r.profile?.email ?? null,
       logoUrl: r.profile?.logoUrl ?? null,
-      address: r.location?.addresses?.[0]?.street ?? null,
+      address: r.location?.addresses?.[0]
+        ? [
+            r.location.addresses[0].street,
+            r.location.addresses[0].neighborhood,
+            r.location.addresses[0].city,
+          ]
+            .filter(Boolean)
+            .join(", ")
+        : null,
       neighborhood: r.location?.addresses?.[0]?.neighborhood ?? null,
       city: r.location?.addresses?.[0]?.city ?? null,
       state: r.location?.addresses?.[0]?.state ?? null,
@@ -764,5 +796,35 @@ export class PrismaRestaurantsRepository implements IRestaurantsRepository {
       })),
       createdAt: r.createdAt ?? new Date(),
     };
+  }
+
+  async getPublicRestaurants(): Promise<PublicRestaurantItem[]> {
+    const restaurants = await prisma.restaurant.findMany({
+      where: {
+        status: { name: "ACTIVE" },
+      },
+      include: {
+        profile: true,
+        location: {
+          include: {
+            addresses: true,
+          },
+        },
+      },
+    });
+
+    return restaurants.map((r) => ({
+      id: r.id,
+      name: r.profile?.name ?? "Restaurante",
+      address: r.location?.addresses?.[0]?.street ?? "",
+      latitude:
+        r.location?.addresses?.[0]?.latitude != null
+          ? Number(r.location.addresses[0].latitude)
+          : null,
+      longitude:
+        r.location?.addresses?.[0]?.longitude != null
+          ? Number(r.location.addresses[0].longitude)
+          : null,
+    }));
   }
 }

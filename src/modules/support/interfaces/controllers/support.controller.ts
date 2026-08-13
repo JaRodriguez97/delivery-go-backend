@@ -96,4 +96,24 @@ export class SupportController {
       res.status(500).json({ error: "Error al agregar comentario" });
     }
   }
+
+  static async updateStatus(req: AuthenticatedRequest, res: Response) {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        res.status(401).json({ error: "No autenticado" });
+        return;
+      }
+
+      await repo.updateStatus(
+        req.params.id as string,
+        req.body.status,
+        userId,
+      );
+      res.json({ message: "Estado de ticket actualizado" });
+    } catch (error) {
+      console.error("❌ Error al actualizar estado del ticket:", error);
+      res.status(500).json({ error: "Error al actualizar estado del ticket" });
+    }
+  }
 }

@@ -134,8 +134,8 @@ export interface IRidersRepository {
     totalAmount: number;
   }>;
   getRiderEarnings(id: string): Promise<{
-    today: { amount: number; deliveries: number; hours: number; tips: number };
-    week: { amount: number; deliveries: number; hours: number; tips: number };
+    today: { amount: number; deliveries: number; hours: number; tips: number; change?: number };
+    week: { amount: number; deliveries: number; hours: number; tips: number; change?: number };
     month: { amount: number; deliveries: number; hours: number; tips: number };
     weeklyChart: { day: string; amount: number }[];
     pendingPayments: any[];

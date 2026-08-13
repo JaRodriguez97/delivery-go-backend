@@ -44,8 +44,8 @@ export interface OrderListItem {
 
 export interface OrderDetail {
   id: string;
-  restaurant: { id: string; name: string };
-  customer: { id: string; name: string; email: string };
+  restaurant: { id: string; name: string; address?: string };
+  customer: { id: string; name: string; email: string; phone?: string | null };
   customerAddress?: string;
   paymentMethod?: string;
   deliveryDistanceKm?: number;
@@ -122,6 +122,7 @@ export interface IOrdersRepository {
     paymentMethod?: string;
     priorityId?: string;
     deliveryFee?: number;
+    notes?: string;
     items?: {
       name: string;
       quantity: number;

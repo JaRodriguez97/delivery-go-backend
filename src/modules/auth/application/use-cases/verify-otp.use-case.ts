@@ -22,6 +22,40 @@ export class VerifyOtpUseCase {
       throw new AuthError("Usuario no encontrado", 404);
     }
 
+    if (user.status !== "ACTIVE") {
+      await this.authRepo.createAuditLog({
+        userId: user.id,
+        action: "VERIFICATION",
+        success: false,
+        failureReason: "UNKNOWN",
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      });
+
+      if (user.status === "PENDING") {
+        throw new AuthError(
+          "Tu registro está en proceso de revisión por el administrador.",
+          403,
+          "ACCOUNT_PENDING",
+        );
+      }
+      if (user.status === "INACTIVE" || user.status === "REJECTED") {
+        throw new AuthError(
+          "Tu registro fue rechazado por el administrador.",
+          403,
+          "ACCOUNT_REJECTED",
+        );
+      }
+      if (user.status === "SUSPENDED") {
+        throw new AuthError(
+          "Tu cuenta ha sido suspendida temporalmente.",
+          403,
+          "ACCOUNT_SUSPENDED",
+        );
+      }
+      throw new AuthError("Cuenta inactiva o suspendida", 403, "ACCOUNT_INACTIVE");
+    }
+
     // 1. Buscamos el código OTP más reciente y activo del usuario
     const otp = await prisma.loginOtp.findFirst({
       where: {

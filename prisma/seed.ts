@@ -245,7 +245,7 @@ async function main() {
   // ─── Order statuses ───
   const orderStatuses = [
     { name: "PENDING", description: "Orden pendiente de confirmación" },
-    { name: "CONFIRMED", description: "Orden confirmada por el restaurante" },
+    { name: "ASSIGNED", description: "Orden asignada al repartidor" },
     { name: "PREPARING", description: "Orden en preparación" },
     { name: "READY", description: "Orden lista para recoger" },
     { name: "PICKED_UP", description: "Orden recogida por el repartidor" },

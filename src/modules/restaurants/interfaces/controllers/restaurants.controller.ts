@@ -173,4 +173,15 @@ export class RestaurantsController {
       });
     }
   }
+
+  static async listPublic(req: Request, res: Response) {
+    try {
+      const data = await repo.getPublicRestaurants();
+      res.json({ data });
+    } catch (error: any) {
+      res.status(500).json({
+        error: error?.message || "Error al obtener restaurantes públicos",
+      });
+    }
+  }
 }

@@ -159,7 +159,8 @@ export class GeocodeController {
             "";
           const houseNumber = item.address?.house_number?.trim() ?? "";
           const road = item.address?.road?.trim() ?? "";
-          const street = [road, houseNumber].filter(Boolean).join(" ").trim();
+          // Formato colombiano: "Carrera 5 # 34-18"
+          const street = road && houseNumber ? `${road} # ${houseNumber}` : road || houseNumber;
           const latitude = Number(item.lat ?? 0);
           const longitude = Number(item.lon ?? 0);
 

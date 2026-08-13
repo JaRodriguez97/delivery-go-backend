@@ -16,6 +16,7 @@ router.get("/", SupportController.list);
 router.get("/:id", SupportController.getById);
 router.post("/", validate(createTicketSchema), SupportController.create);
 router.post("/:id/close", validate(closeTicketSchema), SupportController.close);
+router.patch("/:id/status", SupportController.updateStatus);
 router.post(
   "/:id/comments",
   validate(addCommentSchema),

@@ -506,4 +506,29 @@ export class PrismaSupportRepository implements ISupportRepository {
     });
     return { id: event.id };
   }
+
+  async updateStatus(
+    id: string,
+    status: string,
+    userId: string,
+  ): Promise<void> {
+    await prisma.$transaction([
+      prisma.supportTicket.update({
+        where: { id },
+        data: {
+          status,
+          ...(status === "CLOSED" ? { closedAt: new Date() } : {}),
+        },
+      }),
+      prisma.supportTicketEvent.create({
+        data: {
+          ticketId: id,
+          eventType: "STATUS_CHANGED",
+          message: `Estado cambiado a ${status}`,
+          createdBy: userId,
+          createdAt: new Date(),
+        },
+      }),
+    ]);
+  }
 }

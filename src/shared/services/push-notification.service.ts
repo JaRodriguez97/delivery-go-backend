@@ -11,6 +11,31 @@ export class PushNotificationService {
     data?: Record<string, string>
   ): Promise<boolean> {
     try {
+      // Guardar en la base de datos
+      try {
+        const notif = await prisma.notification.create({
+          data: {
+            code: "PUSH",
+            entityType: data?.entityType || null,
+            entityId: data?.entityId || null,
+            payload: { title, body, data },
+            status: "SENT",
+            createdAt: new Date(),
+            processedAt: new Date(),
+          },
+        });
+
+        await prisma.notificationRecipient.create({
+          data: {
+            notificationId: notif.id,
+            userId,
+            createdAt: new Date(),
+          },
+        });
+      } catch (dbError) {
+        console.error("❌ Error al guardar notificación en DB:", dbError);
+      }
+
       // 1. Buscamos los dispositivos push activos asociados al usuario
       const devices = await prisma.pushDevice.findMany({
         where: {

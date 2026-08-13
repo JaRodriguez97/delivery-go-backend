@@ -93,4 +93,5 @@ export interface ISupportRepository {
     comment: string,
     userId: string,
   ): Promise<{ id: string }>;
+  updateStatus(id: string, status: string, userId: string): Promise<void>;
 }

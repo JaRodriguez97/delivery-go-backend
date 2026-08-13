@@ -14,6 +14,7 @@ export class TrackingController {
         "ONLINE",
         "OFFLINE",
         "IN_DELIVERY",
+        "UNASSIGNED",
       ];
 
       const filter = allowedFilters.includes(rawFilter as ActiveDeliveryFilter)

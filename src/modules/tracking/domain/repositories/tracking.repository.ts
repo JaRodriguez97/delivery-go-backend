@@ -39,7 +39,7 @@ export interface RoutePointResult {
   address?: string;
 }
 
-export type ActiveDeliveryFilter = "ALL" | "ONLINE" | "OFFLINE" | "IN_DELIVERY";
+export type ActiveDeliveryFilter = "ALL" | "ONLINE" | "OFFLINE" | "IN_DELIVERY" | "UNASSIGNED";
 
 export interface ActiveDeliveryResult {
   deliveryId: string;
@@ -57,6 +57,10 @@ export interface ActiveDeliveryResult {
     longitude: number;
   } | null;
   destinationAddress: string | null;
+  destinationLocation?: {
+    latitude: number;
+    longitude: number;
+  } | null;
   riderLocation: {
     latitude: number;
     longitude: number;

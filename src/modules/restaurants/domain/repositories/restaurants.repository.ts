@@ -132,4 +132,13 @@ export interface IRestaurantsRepository {
   ): Promise<void>;
   deleteRestaurant(id: string): Promise<void>;
   getRestaurantByUserId(userId: string): Promise<RestaurantDetail | null>;
+  getPublicRestaurants(): Promise<PublicRestaurantItem[]>;
+}
+
+export interface PublicRestaurantItem {
+  id: string;
+  name: string;
+  address: string;
+  latitude: number | null;
+  longitude: number | null;
 }

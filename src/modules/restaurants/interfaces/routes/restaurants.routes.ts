@@ -46,6 +46,8 @@ router.post(
   RestaurantsController.register,
 );
 
+router.get("/public", RestaurantsController.listPublic);
+
 router.use(authenticationMiddleware);
 
 router.get("/my-restaurant", RestaurantsController.getMyRestaurant);

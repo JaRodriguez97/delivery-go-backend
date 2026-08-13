@@ -45,4 +45,42 @@ export class PushController {
       res.status(500).json({ error: "Error interno al registrar el dispositivo" });
     }
   }
+
+  static async getNotifications(req: AuthenticatedRequest, res: Response) {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        res.status(401).json({ error: "No autenticado" });
+        return;
+      }
+
+      const recipients = await prisma.notificationRecipient.findMany({
+        where: { userId },
+        include: {
+          notification: true,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+        take: 50,
+      });
+
+      const notifications = recipients.map((r) => {
+        const payload = r.notification.payload as any;
+        return {
+          id: r.id,
+          notificationId: r.notificationId,
+          title: payload?.title || "Notificación",
+          body: payload?.body || "",
+          data: payload?.data || {},
+          createdAt: r.createdAt || r.notification.createdAt || new Date(),
+        };
+      });
+
+      res.json({ data: notifications });
+    } catch (error) {
+      console.error("❌ Error al obtener notificaciones:", error);
+      res.status(500).json({ error: "Error interno al obtener las notificaciones" });
+    }
+  }
 }

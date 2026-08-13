@@ -1,8 +1,8 @@
 import { z } from "zod";
 
 export const createOrderSchema = z.object({
-  restaurantId: z.string().uuid().optional(),
-  customerId: z.string().uuid().optional(),
+  restaurantId: z.uuid().optional(),
+  customerId: z.uuid().optional(),
   customerName: z.string().optional(),
   customerPhone: z.string().optional(),
   customerAddress: z.string().min(5).optional(),
@@ -13,6 +13,7 @@ export const createOrderSchema = z.object({
   paymentMethod: z.string().min(3).optional(),
   priorityId: z.string().uuid().optional(),
   deliveryFee: z.number().min(0).optional(),
+  notes: z.string().optional(),
   items: z
     .array(
       z.object({

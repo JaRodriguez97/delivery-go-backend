@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { PrismaOrdersRepository } from "../../infrastructure/repositories/prisma-orders.repository";
 import { prisma } from "../../../../shared/config/database";
+import { PushNotificationService } from "../../../../shared/services/push-notification.service";
 import { AuthenticatedRequest } from "../../../../shared/types/authenticated-request";
 import { GetOrdersUseCase } from "../../application/use-cases/get-orders.use-case";
 import { GetOrderByIdUseCase } from "../../application/use-cases/get-order-by-id.use-case";
@@ -54,7 +55,7 @@ export class OrdersController {
       }
 
       const currentStatus = String(order.status?.name ?? "").toUpperCase();
-      if (!["PENDING", "CONFIRMED"].includes(currentStatus)) {
+      if (!["PENDING", "ASSIGNED"].includes(currentStatus)) {
         res.status(400).json({ error: "El pedido no está en estado inicial" });
         return;
       }
@@ -109,6 +110,15 @@ export class OrdersController {
             },
           },
           status: { select: { name: true } },
+          delivery: {
+            select: {
+              courier: {
+                select: {
+                  userId: true,
+                },
+              },
+            },
+          },
         },
       });
 
@@ -159,6 +169,38 @@ export class OrdersController {
           },
         });
       });
+
+      // Enviar notificaciones push fuera de la transacción
+      const courierUserId = order.delivery?.courier?.userId;
+      if (courierUserId) {
+        try {
+          await PushNotificationService.sendToUser(
+            courierUserId,
+            "🎉 ¡Pedido Listo!",
+            `El restaurante ha marcado el pedido #${order.id.substring(0, 8).toUpperCase()} como listo para recoger.`,
+          );
+        } catch (err) {
+          console.error(
+            "❌ Error al enviar notificación al repartidor (markReady):",
+            err,
+          );
+        }
+      }
+
+      if (order.customerId) {
+        try {
+          await PushNotificationService.sendToUser(
+            order.customerId,
+            "🍽️ Pedido Listo",
+            `Tu pedido #${order.id.substring(0, 8).toUpperCase()} está listo y el repartidor lo recogerá pronto.`,
+          );
+        } catch (err) {
+          console.error(
+            "❌ Error al enviar notificación al cliente (markReady):",
+            err,
+          );
+        }
+      }
 
       res.json({ message: "Pedido marcado como listo para recoger" });
     } catch {
@@ -251,8 +293,12 @@ export class OrdersController {
       const filters = {
         status: req.query.status as string | undefined,
         search: req.query.search as string | undefined,
-        dateFrom: req.query.dateFrom ? new Date(req.query.dateFrom as string) : undefined,
-        dateTo: req.query.dateTo ? new Date(req.query.dateTo as string) : undefined,
+        dateFrom: req.query.dateFrom
+          ? new Date(req.query.dateFrom as string)
+          : undefined,
+        dateTo: req.query.dateTo
+          ? new Date(req.query.dateTo as string)
+          : undefined,
         restaurantId: restaurantIdFilter,
       };
 
@@ -281,13 +327,16 @@ export class OrdersController {
 
         return {
           id: o.id,
-          createdAt: o.createdAt ? new Date(o.createdAt).toLocaleString("es-CO") : "",
+          createdAt: o.createdAt
+            ? new Date(o.createdAt).toLocaleString("es-CO")
+            : "",
           customerName: o.customer?.profile
             ? `${o.customer.profile.firstName ?? ""} ${o.customer.profile.lastName ?? ""}`.trim()
             : o.customerName || "N/A",
           customerAddress: o.customerAddress || "N/A",
           customerPhone: o.customer?.profile?.phone || o.customerPhone || "N/A",
-          restaurantName: o.restaurant?.profile?.name || o.restaurantName || "N/A",
+          restaurantName:
+            o.restaurant?.profile?.name || o.restaurantName || "N/A",
           foodAmount: foodAmountVal,
           deliveryFee: deliveryFeeVal,
           totalAmount: totalAmountVal,
@@ -299,7 +348,10 @@ export class OrdersController {
       const csv = convertToCSV(csvData, fields);
 
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
-      res.setHeader("Content-Disposition", `attachment; filename=reporte-pedidos-${Date.now()}.csv`);
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename=reporte-pedidos-${Date.now()}.csv`,
+      );
       res.status(200).send(csv);
     } catch (error) {
       res.status(500).json({ error: "Error al exportar reporte a CSV" });
@@ -352,8 +404,10 @@ export class OrdersController {
     try {
       await deleteOrder.execute(req.params.id as string);
       res.json({ message: "Pedido cancelado" });
-    } catch (error) {
-      res.status(500).json({ error: "Error al cancelar pedido" });
+    } catch (error: any) {
+      res
+        .status(400)
+        .json({ error: error?.message || "Error al cancelar pedido" });
     }
   }
 
@@ -420,7 +474,8 @@ export class OrdersController {
       }
 
       await repo.updateDeliveryStatus(req.params.id as string, status);
-      res.json({ message: "Estado de entrega actualizado" });
+      const updatedOrder = await repo.getOrderById(req.params.id as string);
+      res.json(updatedOrder);
     } catch (error: any) {
       res.status(400).json({
         error: error?.message || "No fue posible actualizar el estado",

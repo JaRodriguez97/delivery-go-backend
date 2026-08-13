@@ -1,5 +1,6 @@
 import { prisma } from "../../../../shared/config/database";
 import crypto from "crypto";
+import { PushNotificationService } from "../../../../shared/services/push-notification.service";
 import { UserStatus } from "@prisma/client";
 import {
   IRidersRepository,
@@ -28,7 +29,7 @@ export class PrismaRidersRepository implements IRidersRepository {
     userId: string,
     isOnline: boolean,
   ): Promise<{ isOnline: boolean; lastSeen: Date }> {
-    console.log(userId)
+    console.log(userId);
     const courier = await prisma.courier.findFirst({
       where: { userId },
       select: { id: true, availabilityId: true },
@@ -347,17 +348,17 @@ export class PrismaRidersRepository implements IRidersRepository {
     id: string,
     data: { action: "APPROVE" | "REJECT"; notes?: string },
   ): Promise<void> {
-    await prisma.$transaction(async (tx) => {
-      const courier = await tx.courier.findUnique({
+    const approved = data.action === "APPROVE";
+
+    const courier = await prisma.$transaction(async (tx) => {
+      const c = await tx.courier.findUnique({
         where: { id },
         select: { id: true, userId: true },
       });
 
-      if (!courier) {
+      if (!c) {
         throw new Error("Repartidor no encontrado");
       }
-
-      const approved = data.action === "APPROVE";
 
       await tx.courier.update({
         where: { id },
@@ -377,16 +378,32 @@ export class PrismaRidersRepository implements IRidersRepository {
         },
       });
 
-      if (courier.userId) {
+      if (c.userId) {
         await tx.user.update({
-          where: { id: courier.userId },
+          where: { id: c.userId },
           data: {
             status: approved ? "ACTIVE" : "SUSPENDED",
             updatedAt: new Date(),
           },
         });
       }
+
+      return c;
     });
+
+    if (courier.userId) {
+      try {
+        await PushNotificationService.sendToUser(
+          courier.userId,
+          approved ? "🎉 Cuenta aprobada" : "❌ Registro rechazado",
+          approved
+            ? "Tu cuenta de repartidor ha sido aprobada. ¡Ya puedes conectarte y aceptar servicios!"
+            : `Tu registro no fue aprobado. Motivo: ${data.notes || "Documentos no legibles o de vehículo inválidos."}`,
+        );
+      } catch (err) {
+        console.error("❌ Error al enviar notificación en reviewRider:", err);
+      }
+    }
   }
 
   async getRiders(
@@ -480,9 +497,9 @@ export class PrismaRidersRepository implements IRidersRepository {
 
     const userProfile = c.userId
       ? await prisma.userProfile.findUnique({
-        where: { userId: c.userId },
-        select: { documentNumberEncrypted: true },
-      })
+          where: { userId: c.userId },
+          select: { documentNumberEncrypted: true },
+        })
       : null;
 
     const documentNumber = userProfile?.documentNumberEncrypted
@@ -501,14 +518,14 @@ export class PrismaRidersRepository implements IRidersRepository {
       documentNumber,
       vehicle: c.vehicle
         ? {
-          type: c.vehicle.type ?? "",
-          brand: c.vehicle.brand ?? "",
-          model: c.vehicle.model ?? "",
-          plate: c.vehicle.plate ?? "",
-          serialNumber: c.vehicle.serialNumber ?? "",
-          year: c.vehicle.year ?? null,
-          color: c.vehicle.color ?? "",
-        }
+            type: c.vehicle.type ?? "",
+            brand: c.vehicle.brand ?? "",
+            model: c.vehicle.model ?? "",
+            plate: c.vehicle.plate ?? "",
+            serialNumber: c.vehicle.serialNumber ?? "",
+            year: c.vehicle.year ?? null,
+            color: c.vehicle.color ?? "",
+          }
         : null,
       documents: c.documents.map((d) => ({
         id: d.id,
@@ -779,7 +796,9 @@ export class PrismaRidersRepository implements IRidersRepository {
       return {
         id: d.id,
         orderId: d.orderId,
-        code: d.order?.id?.substring(0, 8).toUpperCase() || d.id.substring(0, 8).toUpperCase(),
+        code:
+          d.order?.id?.substring(0, 8).toUpperCase() ||
+          d.id.substring(0, 8).toUpperCase(),
         status: d.status || "UNKNOWN",
         restaurantName: d.order?.restaurant?.profile?.name || "Restaurante",
         customerAddress: logistics.customerAddress || "Dirección de entrega",
@@ -813,8 +832,8 @@ export class PrismaRidersRepository implements IRidersRepository {
   }
 
   async getRiderEarnings(id: string): Promise<{
-    today: { amount: number; deliveries: number; hours: number; tips: number };
-    week: { amount: number; deliveries: number; hours: number; tips: number };
+    today: { amount: number; deliveries: number; hours: number; tips: number; change?: number };
+    week: { amount: number; deliveries: number; hours: number; tips: number; change?: number };
     month: { amount: number; deliveries: number; hours: number; tips: number };
     weeklyChart: { day: string; amount: number }[];
     pendingPayments: any[];
@@ -825,20 +844,48 @@ export class PrismaRidersRepository implements IRidersRepository {
     const startOfToday = new Date(now);
     startOfToday.setHours(0, 0, 0, 0);
 
+    const startOfYesterday = new Date(startOfToday);
+    startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+
     const startOfWeek = new Date(now);
     const day = startOfWeek.getDay();
     const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
     startOfWeek.setDate(diff);
     startOfWeek.setHours(0, 0, 0, 0);
 
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const startOfPrevWeek = new Date(startOfWeek);
+    startOfPrevWeek.setDate(startOfPrevWeek.getDate() - 7);
 
-    const [todayDeliveries, weekDeliveries, monthDeliveries] = await Promise.all([
+    const startOfMonth = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      1,
+      0,
+      0,
+      0,
+      0,
+    );
+
+    const [
+      todayDeliveries,
+      yesterdayDeliveries,
+      weekDeliveries,
+      prevWeekDeliveries,
+      monthDeliveries,
+    ] = await Promise.all([
       prisma.delivery.findMany({
         where: {
           courierId: id,
           status: "DELIVERED",
           completedAt: { gte: startOfToday },
+        },
+        include: { order: { select: { deliveryFee: true } } },
+      }),
+      prisma.delivery.findMany({
+        where: {
+          courierId: id,
+          status: "DELIVERED",
+          completedAt: { gte: startOfYesterday, lt: startOfToday },
         },
         include: { order: { select: { deliveryFee: true } } },
       }),
@@ -854,6 +901,14 @@ export class PrismaRidersRepository implements IRidersRepository {
         where: {
           courierId: id,
           status: "DELIVERED",
+          completedAt: { gte: startOfPrevWeek, lt: startOfWeek },
+        },
+        include: { order: { select: { deliveryFee: true } } },
+      }),
+      prisma.delivery.findMany({
+        where: {
+          courierId: id,
+          status: "DELIVERED",
           completedAt: { gte: startOfMonth },
         },
         include: { order: { select: { deliveryFee: true } } },
@@ -861,10 +916,18 @@ export class PrismaRidersRepository implements IRidersRepository {
     ]);
 
     const getStats = (deliveries: any[]) => {
-      const amount = deliveries.reduce((sum, d) => sum + Number(d.order?.deliveryFee || 0), 0);
+      const amount = deliveries.reduce(
+        (sum, d) => sum + Number(d.order?.deliveryFee || 0),
+        0,
+      );
       const minutes = deliveries.reduce((sum, d) => {
         if (d.startedAt && d.completedAt) {
-          return sum + Math.round((d.completedAt.getTime() - d.startedAt.getTime()) / (1000 * 60));
+          return (
+            sum +
+            Math.round(
+              (d.completedAt.getTime() - d.startedAt.getTime()) / (1000 * 60),
+            )
+          );
         }
         return sum + 25;
       }, 0);
@@ -874,8 +937,20 @@ export class PrismaRidersRepository implements IRidersRepository {
     };
 
     const todayStats = getStats(todayDeliveries);
+    const yesterdayStats = getStats(yesterdayDeliveries);
     const weekStats = getStats(weekDeliveries);
+    const prevWeekStats = getStats(prevWeekDeliveries);
     const monthStats = getStats(monthDeliveries);
+
+    const calculateChange = (current: number, previous: number): number => {
+      if (previous === 0) {
+        return current > 0 ? 100 : 0;
+      }
+      return Math.round(((current - previous) / previous) * 100);
+    };
+
+    const todayChange = calculateChange(todayStats.amount, yesterdayStats.amount);
+    const weekChange = calculateChange(weekStats.amount, prevWeekStats.amount);
 
     const daysOfWeek = ["L", "M", "M", "J", "V", "S", "D"];
     const weeklyChart = daysOfWeek.map((dayName, index) => {
@@ -892,7 +967,10 @@ export class PrismaRidersRepository implements IRidersRepository {
         return time >= startOfDay.getTime() && time <= endOfDay.getTime();
       });
 
-      const amount = dayDeliveries.reduce((sum, d) => sum + Number(d.order?.deliveryFee || 0), 0);
+      const amount = dayDeliveries.reduce(
+        (sum, d) => sum + Number(d.order?.deliveryFee || 0),
+        0,
+      );
       return { day: dayName, amount };
     });
 
@@ -910,7 +988,9 @@ export class PrismaRidersRepository implements IRidersRepository {
       {
         id: "payment-1",
         title: "Transferencia Bancaria",
-        date: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toLocaleDateString("es-ES", {
+        date: new Date(
+          now.getTime() - 7 * 24 * 60 * 60 * 1000,
+        ).toLocaleDateString("es-ES", {
           day: "2-digit",
           month: "short",
           year: "numeric",
@@ -921,7 +1001,9 @@ export class PrismaRidersRepository implements IRidersRepository {
       {
         id: "payment-2",
         title: "Transferencia Bancaria",
-        date: new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).toLocaleDateString("es-ES", {
+        date: new Date(
+          now.getTime() - 14 * 24 * 60 * 60 * 1000,
+        ).toLocaleDateString("es-ES", {
           day: "2-digit",
           month: "short",
           year: "numeric",
@@ -932,8 +1014,8 @@ export class PrismaRidersRepository implements IRidersRepository {
     ];
 
     return {
-      today: todayStats,
-      week: weekStats,
+      today: { ...todayStats, change: todayChange },
+      week: { ...weekStats, change: weekChange },
       month: monthStats,
       weeklyChart,
       pendingPayments,
